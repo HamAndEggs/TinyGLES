@@ -24,8 +24,12 @@
 #include <functional>
 
 #include <signal.h>
+
+#define EGL_EGLEXT_PROTOTYPES
 #include <GLES2/gl2.h>	//sudo apt install libgles2-mesa-dev
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <gbm.h> //sudo apt install libgbm-dev see https://packages.debian.org/sid/libgbm-dev
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -119,6 +123,11 @@ public:
 	void EndFrame();
 
 	/**
+	 * @brief Clears the screen to the colour passed.
+	 */
+	void Clear(uint8_t pRed,uint8_t pGreen,uint8_t pBlue);
+
+	/**
 	 * @brief Sets the flag for the main loop to false and fires the SYSTEM_EVENT_EXIT_REQUEST
 	 * You would typically call this from a UI button to quit the app.
 	 */
@@ -180,6 +189,7 @@ private:
 	int mWidth = 0;
 	int mHeight = 0;
 
+	struct gbm_device *mGDMDevice = nullptr;
 	EGLDisplay mDisplay = nullptr;				//!<GL display
 	EGLSurface mSurface = nullptr;				//!<GL rendering surface
 	EGLContext mContext = nullptr;				//!<GL rendering context

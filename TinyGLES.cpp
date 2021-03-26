@@ -25,7 +25,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <linux/input.h>
-#include <gbm.h> //sudo apt install libgbm-dev see https://packages.debian.org/sid/libgbm-dev
+#include <linux/fb.h>
+#include <linux/videodev2.h>
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -85,8 +86,18 @@ bool GLES::BeginFrame()
 
 void GLES::EndFrame()
 {
+	eglSwapBuffers(mDisplay,mSurface);
+
 	ProcessSystemEvents();
 }
+
+void GLES::Clear(uint8_t pRed,uint8_t pGreen,uint8_t pBlue)
+{
+	glClearColor((float)pRed / 255.0f,(float)pGreen / 255.0f,(float)pBlue / 255.0f,1.0f);
+	glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+	CHECK_OGL_ERRORS();
+}
+
 
 void GLES::OnApplicationExitRequest()
 {
@@ -167,21 +178,43 @@ void GLES::ProcessSystemEvents()
 
 void GLES::InitialiseDisplay()
 {
-	struct gbm_device *gbm = NULL;
+	
 
 	int fd = open("/dev/dri/card0", O_RDWR | FD_CLOEXEC);
 	if (fd < 0)
 	{
 		throw std::runtime_error("failed toopen display /dev/dri/card0");
 	}
+	
+	struct fb_var_screeninfo vinfo;
+	{
+		int File = open("/dev/fb0", O_RDWR);
+		if(ioctl(File, FBIOGET_VSCREENINFO, &vinfo) ) 
+		{
+			throw std::runtime_error("failed to open ioctl");
+		}
+	}
 
-	gbm = gbm_create_device(fd);
-	if (!gbm)
+	mWidth = vinfo.xres;
+	mHeight = vinfo.yres;
+	VERBOSE_MESSAGE("Display resolution is " << mWidth << "x" << mHeight );
+
+	mGDMDevice = gbm_create_device(fd);
+	if (!mGDMDevice)
 	{
 		throw std::runtime_error("gbm_create_device failed");
 	}
 
-	mDisplay = eglGetDisplay((NativeDisplayType)gbm);
+#ifdef EGL_MESA_platform_gbm
+	PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+	if( !eglGetPlatformDisplayEXT )
+	{
+		throw std::runtime_error("Failed to find function eglGetPlatformDisplayEXT");
+	}
+	mDisplay = eglGetPlatformDisplayEXT(EGL_PLATFORM_GBM_MESA,mGDMDevice, NULL);
+#else
+	mDisplay = eglGetDisplay((NativeDisplayType)mGDMDevice);
+#endif
 	
 	if( !mDisplay )
 	{
@@ -261,11 +294,13 @@ void GLES::CreateRenderingContext()
 		throw std::runtime_error("Failed to get a rendering context");
 	}
 
-	mSurface = eglCreateWindowSurface(mDisplay,mConfig,0,0);
+	struct gbm_surface *gbm_surface = gbm_surface_create(mGDMDevice,mWidth,mHeight, GBM_FORMAT_XRGB8888, GBM_BO_USE_SCANOUT|GBM_BO_USE_RENDERING);
 
+	mSurface = eglCreateWindowSurface(mDisplay,mConfig,(EGLNativeWindowType)gbm_surface,0);
 	if( mSurface == EGL_NO_SURFACE )
 	{
-		throw std::runtime_error("Failed to create display surfaces");
+		CHECK_OGL_ERRORS();		
+		throw std::runtime_error("Failed to create window surface");
 	}
 
 	CHECK_OGL_ERRORS();
