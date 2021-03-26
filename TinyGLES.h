@@ -24,7 +24,7 @@
 #include <functional>
 
 #include <signal.h>
-#include <GLES2/gl2.h>
+#include <GLES2/gl2.h>	//sudo apt install libgles2-mesa-dev
 #include <EGL/egl.h>
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)

@@ -175,7 +175,7 @@ void GLES::InitialiseDisplay()
 	//Now we have a display lets initialize it.
 	if( !eglInitialize(mDisplay, &mMajorVersion, &mMinorVersion) )
 	{
-		throw std::runtime_error("eglInitialize() failed");
+//		throw std::runtime_error("eglInitialize() failed");
 	}
 	CHECK_OGL_ERRORS();
 

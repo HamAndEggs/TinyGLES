@@ -2,5 +2,6 @@
 A minimal single header and source file implementation of GLES. Mainly for use on systems that are NOT running a desktop
 
 ## RPi users note
-As of 26 Match 2021 their distro installs the headers and libs in a non standard location, /opt/vc/include and /opt/vc/lib and so you may need to add these paths to your project if moving from a desktop system to a RPi.
-
+Please ensure to install mesa GLES on a fresh install of their OS. By default they only ship with the GLES VC4 chack libs.
+sudo apt install libgles2-mesa-dev
+sudo apt-get install libegl1-mesa-dev
