@@ -1,4 +1,6 @@
 
+#include "TinyGLES.h"
+
 #include <iostream>
 
 int main(int argc, char *argv[])
@@ -11,6 +13,13 @@ int main(int argc, char *argv[])
     std::cout << "Build date and time " << APP_BUILD_DATE_TIME << '\n';
     std::cout << "Build date " << APP_BUILD_DATE << '\n';
     std::cout << "Build time " << APP_BUILD_TIME << '\n';
+
+    tinygles::GLES theDisplay(true);
+
+    while( theDisplay.BeginFrame() )
+    {
+        theDisplay.EndFrame();
+    }
 
 // And quit\n";
     return EXIT_SUCCESS;

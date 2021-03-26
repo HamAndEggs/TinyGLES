@@ -16,27 +16,31 @@
 	Original code base is at https://github.com/HamAndEggs/TinyGLES   
    
 */
-
 #include "TinyGLES.h"
+
+#include <iostream>
+
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <sys/stat.h>
+
+#include <linux/input.h>
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-GLES* GLES::Open(bool pVerbose)
+GLES::GLES(bool pVerbose) :
+	mVerbose(pVerbose)
 {
-	
-}
-
-GLES::GLES()
-{
-	FrameBuffer::mKeepGoing = true;
+	GLES::mKeepGoing = true;
 
 	// Lets hook ctrl + c.
 	mUsersSignalAction = signal(SIGINT,CtrlHandler);
 
 	const char* MouseDeviceName = "/dev/input/event0";
 	mPointer.mDevice = open(MouseDeviceName,O_RDONLY|O_NONBLOCK);
-	if( pVerbose )
+	if( mVerbose )
 	{
 		if(  mPointer.mDevice >  0 )
 		{
@@ -64,21 +68,26 @@ GLES::~GLES()
 
 bool GLES::BeginFrame()
 {
-
+	return GLES::mKeepGoing;
 }
 
 void GLES::EndFrame()
 {
-
+	ProcessSystemEvents();
 }
 
 void GLES::OnApplicationExitRequest()
 {
-	GLES::mKeepGoing = false;
-	if( GLES::mSystemEventHandler )
+	if( mVerbose )
+	{
+		std::clog << "Exit request from user, quitting application\n";
+	}
+
+	mKeepGoing = false;
+	if( mSystemEventHandler != nullptr )
 	{
 		SystemEventData data(SYSTEM_EVENT_EXIT_REQUEST);
-		GLES::mSystemEventHandler(data);
+		mSystemEventHandler(data);
 	}
 }
 
@@ -130,11 +139,25 @@ void GLES::ProcessSystemEvents()
 			}
 		}   
 	}
+
+	// Finnally, did they ctrl + c ?
+	if( mCTRL_C_Pressed )
+	{
+		if( mVerbose )
+		{
+			std::clog << "CTRL trapped, quitting application\n";
+		}
+
+		mCTRL_C_Pressed = false; // So we only send once.
+		OnApplicationExitRequest();
+	}
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Code to deal with CTRL + C
 sighandler_t GLES::mUsersSignalAction = NULL;
-GLES::SystemEventHandler GLES::mSystemEventHandler = nullptr;
-bool GLES::mKeepGoing = false;
+bool GLES::mCTRL_C_Pressed = false;
+
 void GLES::CtrlHandler(int SigNum)
 {
 	static int numTimesAskedToExit = 0;
@@ -151,7 +174,7 @@ void GLES::CtrlHandler(int SigNum)
 		exit(1);
 	}
 
-	OnApplicationExitRequest();
+	mCTRL_C_Pressed = true;
 	std::cout << '\n'; // without this the command prompt may be at the end of the ^C char.
 }
 

@@ -21,15 +21,9 @@
 #ifndef TINY_GLES_H
 #define TINY_GLES_H
 
-#include <vector>
-#include <string>
 #include <functional>
-#include <
 
-#include <assert.h>
 #include <signal.h>
-#include <stdint.h>
-#include <time.h>
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -83,17 +77,9 @@ public:
 	typedef std::function<void(const SystemEventData& pEvent)> SystemEventHandler;
 
 	/**
-	 * @brief Creates and opens a GLES object.
-	 * If the OS does not support the frame buffer driver or there is some other error,
-	 * this function will return NULL.
-	 * For simplicity all drawing is done at eight bits per channel to an off screen bufffer.
-	 * This makes the code very simple as the colour space conversion is only done when the
-	 * offscreen buffer is copied to the display.
-	 * 
-	 * @param pVerbose get debugging information as the object is created.
-	 * @return GLES* 
+	 * @brief Creates and opens a GLES object. Throws an excpetion if it fails.
 	 */
-	static GLES* Open(bool pVerbose = false);
+	GLES(bool pVerbose);
 
 	/**
 	 * @brief Clean up code. You must delete your object on exit!
@@ -134,7 +120,7 @@ public:
 	 * @brief Sets the flag for the main loop to false and fires the SYSTEM_EVENT_EXIT_REQUEST
 	 * You would typically call this from a UI button to quit the app.
 	 */
-	static void OnApplicationExitRequest();
+	void OnApplicationExitRequest();
 
 	/**
 	 * @brief Gets the handler that is used to send event information to the application from the system.
@@ -151,25 +137,15 @@ public:
 private:
 
 	/**
-	 * @brief Construct a new Frame Buffer object
-	 */
-	GLES(int pFile,uint8_t* pDisplayBuffer,struct fb_fix_screeninfo pFixInfo,struct fb_var_screeninfo pScreenInfo,bool pVerbose);
-
-	/**
 	 * @brief Check for system events that the application my want.
 	 */
 	void ProcessSystemEvents();
 
-	/**
-	 * @brief Handle ctrl + c event.
-	 * 
-	 * @param SigNum 
-	 */
-	static void CtrlHandler(int SigNum);
-
-	const int mWidth,mHeight;
-
 	const bool mVerbose;
+
+	int mWidth = 0;
+	int mHeight = 0;
+
 	bool mReportedPresentSpeed = false; //!< Used for verbose mode, will tell you the present screen route taken when on using linux frame buffer device.
 
 	/**
@@ -189,17 +165,29 @@ private:
 		}mCurrent;
 	}mPointer;
 
+	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.
+	bool mKeepGoing; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Code to deal with CTRL + C
 	// I'm not a fan of these statics. I will try to avoid them.
 	// The problem is that the OS ignels don't allow me to pass user data.
 	// I don't want an internal pointer to self either.
-	static SystemEventHandler mSystemEventHandler; //!< Where all events that we are intrested in are routed.
-	static bool mKeepGoing; //!< Set to false by the ctrl + c handler.
+	/**
+	 * @brief Handle ctrl + c event.
+	 * 
+	 * @param SigNum 
+	 */
+	static void CtrlHandler(int SigNum);
 
 	/**
 	 * @brief I trap ctrl + c. Because someone may also do this I record their handler and call it when mine is.
 	 * You do not need to handle ctrl + c if you use the member function GetKeepGoing to keep your rendering look going.
 	 */
 	static sighandler_t mUsersSignalAction;
+	static bool mCTRL_C_Pressed;
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 };
 
 
