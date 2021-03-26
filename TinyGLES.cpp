@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <linux/input.h>
+#include <gbm.h> //sudo apt install libgbm-dev see https://packages.debian.org/sid/libgbm-dev
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -166,7 +167,22 @@ void GLES::ProcessSystemEvents()
 
 void GLES::InitialiseDisplay()
 {
-	mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+	struct gbm_device *gbm = NULL;
+
+	int fd = open("/dev/dri/card0", O_RDWR | FD_CLOEXEC);
+	if (fd < 0)
+	{
+		throw std::runtime_error("failed toopen display /dev/dri/card0");
+	}
+
+	gbm = gbm_create_device(fd);
+	if (!gbm)
+	{
+		throw std::runtime_error("gbm_create_device failed");
+	}
+
+	mDisplay = eglGetDisplay((NativeDisplayType)gbm);
+	
 	if( !mDisplay )
 	{
 		throw std::runtime_error("Couldn\'t open the EGL default display");
