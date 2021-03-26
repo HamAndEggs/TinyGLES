@@ -15,7 +15,9 @@
             "libs": [
                 "m",
                 "stdc++",
-                "pthread"
+                "pthread",
+                "GLESv2",
+                "EGL"
             ],
             "define": [
                 "NDEBUG",
@@ -38,7 +40,9 @@
             "libs": [
                 "m",
                 "stdc++",
-                "pthread"
+                "pthread",
+                "GLESv2",
+                "EGL"
             ],
             "define": [
                 "DEBUG_BUILD"

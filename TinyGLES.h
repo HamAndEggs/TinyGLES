@@ -24,6 +24,8 @@
 #include <functional>
 
 #include <signal.h>
+#include <GLES2/gl2.h>
+#include <EGL/egl.h>
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -141,12 +143,52 @@ private:
 	 */
 	void ProcessSystemEvents();
 
+	/**
+	 * @brief Gets the ball rolling by finding the initialsizeing the display.
+	 */
+	void InitialiseDisplay();
+
+	/**
+	 * @brief Looks for the best configuration format for the display.
+	 * Throws an exception if one could not be found.
+	 */
+	void FindGLESConfiguration();
+
+	/**
+	 * @brief Create the rendering context
+	 */
+	void CreateRenderingContext();
+
+	/**
+	 * @brief Sets some common rendering states for a nice starting point.
+	 */
+	void SetRenderingDefaults();
+
+	/**
+	 * @brief For debug and when verbose mode is on will display errors coming from GLES.
+	 * In debug and verbose is false, will say the error once.
+	 * In release code is not included as checking errors all the time can stall the pipeline.
+	 * @param pSource_file_name 
+	 * @param pLine_number 
+	 */
+#ifdef DEBUG_BUILD	
+	void ReadOGLErrors(const char *pSource_file_name,int pLine_number);
+#endif
+
 	const bool mVerbose;
 
 	int mWidth = 0;
 	int mHeight = 0;
 
-	bool mReportedPresentSpeed = false; //!< Used for verbose mode, will tell you the present screen route taken when on using linux frame buffer device.
+	EGLDisplay mDisplay = nullptr;				//!<GL display
+	EGLSurface mSurface = nullptr;				//!<GL rendering surface
+	EGLContext mContext = nullptr;				//!<GL rendering context
+	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
+    EGLint mMajorVersion = 0;					//!<Major version number of GLES we are running on.
+	EGLint mMinorVersion = 0;					//!<Minor version number of GLES we are running on.
+
+	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.
+	bool mKeepGoing = true; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
 
 	/**
 	 * @brief Information about the mouse driver
@@ -164,9 +206,6 @@ private:
 			int y = 0;
 		}mCurrent;
 	}mPointer;
-
-	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.
-	bool mKeepGoing; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Code to deal with CTRL + C
