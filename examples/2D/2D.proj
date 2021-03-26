@@ -1,0 +1,49 @@
+{
+    "source_files": [
+        "2D.cpp",
+        "../../TinyGLES.cpp"
+    ],
+    "configurations": {
+        "release": {
+            "default": false,
+            "standard": "c++17",
+            "include": [
+                "/usr/include/",
+                "../../",
+                "./"
+            ],
+            "libs": [
+                "m",
+                "stdc++",
+                "pthread"
+            ],
+            "define": [
+                "NDEBUG",
+                "RELEASE_BUILD"
+            ]
+        },
+        "debug": {
+            "default": true,
+            "standard": "c++17",
+            "optimisation": "0",
+            "debug_level": "2",
+            "warnings_as_errors": false,
+            "enable_all_warnings": true,
+            "fatal_errors": false,
+            "include": [
+                "/usr/include/",
+                "../../",
+                "./"
+            ],
+            "libs": [
+                "m",
+                "stdc++",
+                "pthread"
+            ],
+            "define": [
+                "DEBUG_BUILD"
+            ]
+        }
+    },
+    "version": "0.0.1"
+}
