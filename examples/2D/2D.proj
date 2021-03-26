@@ -17,7 +17,8 @@
                 "stdc++",
                 "pthread",
                 "GLESv2",
-                "EGL"
+                "EGL",
+                "gbm"
             ],
             "define": [
                 "NDEBUG",
@@ -42,7 +43,8 @@
                 "stdc++",
                 "pthread",
                 "GLESv2",
-                "EGL"
+                "EGL",
+                "gbm"
             ],
             "define": [
                 "DEBUG_BUILD"
