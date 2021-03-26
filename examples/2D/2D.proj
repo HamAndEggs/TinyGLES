@@ -8,7 +8,7 @@
             "default": false,
             "standard": "c++17",
             "include": [
-                "/usr/include/",
+                "/usr/include",
                 "/opt/vc/include",
                 "../../",
                 "./"
@@ -19,6 +19,10 @@
                 "pthread",
                 "GLESv2",
                 "EGL"
+            ],
+            "libpaths":
+            [
+                "/opt/vc/libs"
             ],
             "define": [
                 "NDEBUG",
@@ -34,7 +38,7 @@
             "enable_all_warnings": true,
             "fatal_errors": false,
             "include": [
-                "/usr/include/",
+                "/usr/include",
                 "/opt/vc/include",
                 "../../",
                 "./"
@@ -45,6 +49,10 @@
                 "pthread",
                 "GLESv2",
                 "EGL"
+            ],
+            "libpaths":
+            [
+                "/opt/vc/libs"
             ],
             "define": [
                 "DEBUG_BUILD"
