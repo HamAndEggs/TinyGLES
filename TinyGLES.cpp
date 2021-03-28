@@ -53,11 +53,6 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 #define ATTRIB_COLOUR 1
 #define ATTRIB_UV0 2
 
-struct Vec3D
-{
-	float x,y,z;
-};
-
 struct Quad3D
 {
 	Vec3D v[4];
@@ -221,15 +216,6 @@ void GLES::SetFrustum3D(float pFov, float pAspect, float pNear, float pFar)
 	mMatrices.projection.m[3][1] = 0.0f;
 	mMatrices.projection.m[3][2] = -q * pNear;
 	mMatrices.projection.m[3][3] = 0.0f;
-
-
-/*	RMError result = GI::SetFrustum(pFov,pAspect,pNear,pFar);
-	if(result != RMERROR_OK)
-		return result;
-
-	shaders->Set_Projection(pFov,pAspect,pNear,pFar);
-
-	return m_last_error;*/
 }
 
 
@@ -250,28 +236,51 @@ void GLES::OnApplicationExitRequest()
 
 //*******************************************
 // Primitive draw commands.
-void GLES::FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,int pNumPoints,bool pFilled)
 {
-	float quad[4][2];
+	if( pNumPoints < 1 )
+	{
+        pNumPoints = (int)(3 + (std::sqrt(pRadius)*3));
+	}
 
-	quad[0][0] = pFromX;
-	quad[0][1] = pFromY;
+	// Make sure we don't go too far.
+	if( pNumPoints > m2DWorkSpace.size() )
+	{
+		pNumPoints = m2DWorkSpace.size();
+	}
 
-	quad[1][0] = pToX;
-	quad[1][1] = pFromY;
 
-	quad[2][0] = pToX;
-	quad[2][1] = pToY;
-
-	quad[3][0] = pFromX;
-	quad[3][1] = pToY;
+	float rad = 0.0;
+	const float step = GetRadian() / (float)(pNumPoints-2);//+2 is because of first triangle.
+	const float r = (float)pRadius;
+	const float x = (float)pCenterX;
+	const float y = (float)pCenterY;
+	for( int n = 0 ; n < pNumPoints ; n++, rad += step )
+	{
+		m2DWorkSpace[n].x = pCenterX - (r*std::sin(rad));
+		m2DWorkSpace[n].y = pCenterY + (r*std::cos(rad));
+	}
 
 	mShaders.ColourOnly->Enable(mMatrices.projection);
 	mShaders.ColourOnly->SetTransformIdentity();
-	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,255);
+	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 
-	VertexPtr(2,GL_FLOAT,8,quad);
-	return DrawArray(GL_TRIANGLE_FAN,0,4);
+	VertexPtr(2,GL_FLOAT,8,m2DWorkSpace.data());
+	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,pNumPoints);
+	CHECK_OGL_ERRORS();
+}
+
+void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled)
+{
+	const int16_t quad[8] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY,(int16_t)pFromX,(int16_t)pToY};
+
+	mShaders.ColourOnly->Enable(mMatrices.projection);
+	mShaders.ColourOnly->SetTransformIdentity();
+	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+
+	VertexPtr(2,GL_SHORT,4,quad);
+	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,4);
+	CHECK_OGL_ERRORS();
 }
 
 //*******************************************
@@ -445,6 +454,7 @@ void GLES::CreateRenderingContext()
 		throw std::runtime_error("Failed to get a rendering context");
 	}
 
+// This is annoying but GLES is just broken on RPi and always has been.
 #ifdef PLATFORM_BROADCOM_GLES
 	VC_RECT_T dst_rect;
 	VC_RECT_T src_rect;
@@ -475,9 +485,11 @@ void GLES::CreateRenderingContext()
 	mNativeWindow.width = mWidth;
 	mNativeWindow.height = mHeight;
 	vc_dispmanx_update_submit_sync( dispman_update );
+	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
+#else
+	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
 #endif //PLATFORM_BROADCOM_GLES
 
-	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
 
 	CHECK_OGL_ERRORS();
 	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
@@ -496,19 +508,20 @@ void GLES::SetRenderingDefaults()
 	glPixelStorei(GL_UNPACK_ALIGNMENT,1);
 	SetFrustum2D();
 
-//	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);
+	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
 
 	glDisable(GL_DEPTH_TEST);
 	glDepthFunc(GL_ALWAYS);
-//	glDepthMask(false);
+	glDepthMask(false);
 
-	glDisable(GL_CULL_FACE);
-//	glFrontFace(GL_CW);
-//	glCullFace(GL_BACK);
+	// Always cull, because why not. :) Make code paths simple.
+	glEnable(GL_CULL_FACE);
+	glFrontFace(GL_CW);
+	glCullFace(GL_BACK);
 
+	// I have alpha blend on all the time. Makes life easy. No point in complicating the code for speed, going for simple implementation not fastest!
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glDisable(GL_BLEND);
-//	SetBlendMode(BLENDMODE_OFF);
+	glEnable(GL_BLEND);
 
 	glEnableVertexAttribArray((int)StreamIndex::VERTEX);//Always on
 
@@ -587,16 +600,6 @@ void GLES::SetUserSpaceStreamPtr(StreamIndex pStream,GLint pNum_coord, GLenum pT
 				pType,
 				pType == GL_BYTE,
 				pStride,pPointer);
-}
-
-void GLES::DrawArray(GLenum pType, GLint pStart, GLsizei pCount)
-{
-	//Trap some daft render setups, like no texturing but uv's still enabled.
-//	GLOBAL_ASSERT( m_current_texture || m_options_enabled[ARRAY_TEXTURE_COORD] == 0 );
-//	GLOBAL_ASSERT( (int)pType > -1 && pType < NUM_RMPRIM );
-
-	glDrawArrays(pType,pStart,pCount);
-	CHECK_OGL_ERRORS();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////

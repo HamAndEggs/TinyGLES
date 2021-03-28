@@ -27,16 +27,11 @@
 
 #include <signal.h>
 
-#ifdef PLATFORM_GLES
-	#include "GLES2/gl2.h" //sudo apt install libgles2-mesa-dev
-	#include "EGL/egl.h"
-	#include <gbm.h> //sudo apt install libgbm-dev
-#endif
+#include "GLES2/gl2.h" //sudo apt install libgles2-mesa-dev
+#include "EGL/egl.h"
 
 #ifdef PLATFORM_BROADCOM_GLES
 // All included from /opt/vc/include
-	#include "GLES2/gl2.h"
-	#include "EGL/egl.h"
 	#include "bcm_host.h"
 #endif
 
@@ -88,10 +83,26 @@ constexpr float GetPI()
 	return std::acos(-1);
 }
 
+constexpr float GetRadian()
+{
+	return 2.0f * GetPI();
+}
+
 constexpr float DegreeToRadian(float pDegree)
 {
 	return pDegree * (GetPI()/180.0f);
 }
+
+struct Vec2D
+{
+	float x,y;
+};
+
+struct Vec3D
+{
+	float x,y,z;
+};
+
 
 struct Matrix4x4
 {
@@ -190,7 +201,19 @@ public:
 
 //*******************************************
 // Primitive draw commands.
-	void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
+	/**
+	 * @brief Draws a circle using the pNumPoints to guide how many to use. I have set it to a nice default if < 1 -> 3 + (std::sqrt(pRadius)*3)
+	 */
+	void Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,int pNumPoints,bool pFilled);
+	inline void DrawCircle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,int pNumPoints = 0){Circle(pCenterX,pCenterY,pRadius,pRed,pGreen,pBlue,pAlpha,pNumPoints,false);}
+	inline void FillCircle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,int pNumPoints = 0){Circle(pCenterX,pCenterY,pRadius,pRed,pGreen,pBlue,pAlpha,pNumPoints,true);}
+
+	/**
+	 * @brief Draws a rectangle with the passed in RGB values either filled or not.
+	 */
+	void Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled);
+	inline void DrawRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,false);}
+	inline void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,true);}
 
 private:
 	enum struct StreamIndex
@@ -243,29 +266,25 @@ private:
 	void ColourPtr(GLint pNum_coord, GLsizei pStride,const uint8_t* pPointer);
 	void SetUserSpaceStreamPtr(StreamIndex pStream,GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer);
 
-	void DrawArray(GLenum pType, GLint pStart, GLsizei pCount);
-
 	const bool mVerbose;
 
 	int mWidth = 0;
 	int mHeight = 0;
 
-#if defined PLATFORM_GLES || defined PLATFORM_BROADCOM_GLES
 	EGLDisplay mDisplay = nullptr;				//!<GL display
 	EGLSurface mSurface = nullptr;				//!<GL rendering surface
 	EGLContext mContext = nullptr;				//!<GL rendering context
 	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
     EGLint mMajorVersion = 0;					//!<Major version number of GLES we are running on.
 	EGLint mMinorVersion = 0;					//!<Minor version number of GLES we are running on.
-#endif
 
 #ifdef PLATFORM_BROADCOM_GLES
     EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
+#else
+	EGLNativeWindowType mNativeWindow;
 #endif
 
-#ifdef PLATFORM_GLES // sudo apt install libgles2-mesa-dev
-	EGLNativeWindowType mNativeWindow;
-#endif	
+	std::array<Vec2D,128> m2DWorkSpace;
 
 	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.
 	bool mKeepGoing = true; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
