@@ -16,27 +16,64 @@ int main(int argc, char *argv[])
     std::cout << "Build date " << APP_BUILD_DATE << '\n';
     std::cout << "Build time " << APP_BUILD_TIME << '\n';
 
-    tinygles::GLES theDisplay(true);
+    tinygles::GLES GL(true);
 
-    int n = 0;
-    while( theDisplay.BeginFrame() )
+    int anim = 0;
+    while( GL.BeginFrame() )
     {
-        theDisplay.Clear(0,0,0);
+        anim++;
+        GL.Clear(0,0,0);
+
+        GL.FillRoundedRectangle(50,50,950,550,100,55,20,155);
+        GL.DrawRoundedRectangle(50,50,950,550,100,255,255,255);
 
         for(int n = 0 ; n < 32 ; n++ )
         {
             int w = 8 + (rand()&127);
             int h = 8 + (rand()&127);
 
-            int x = rand()%(theDisplay.GetWidth()-w);
-            int y = rand()%(theDisplay.GetHeight()-h);
+            int x = rand()%(GL.GetWidth()-w);
+            int y = rand()%(GL.GetHeight()-h);
 
-            theDisplay.FillRectangle(x,y,x+w,y+h,rand(),rand(),rand());
+            GL.FillRectangle(x,y,x+w,y+h,rand(),rand(),rand());
         }
 
-        theDisplay.FillRectangle(100,100,400,400,255,0,255);
+        for(int n = 0 ; n < 32 ; n++ )
+        {
+            int w = 8 + (rand()&127);
+            int h = 8 + (rand()&127);
 
-        theDisplay.EndFrame();
+            int x = rand()%(GL.GetWidth()-w);
+            int y = rand()%(GL.GetHeight()-h);
+
+            GL.DrawRectangle(x,y,x+w,y+h,rand(),rand(),rand());
+        }
+
+        for(int n = 0 ; n < 32 ; n++ )
+        {
+            int x1 = rand()%(GL.GetWidth());
+            int y1 = rand()%(GL.GetHeight());
+
+            int x2 = rand()%(GL.GetWidth());
+            int y2 = rand()%(GL.GetHeight());
+
+            GL.Line(x1,y1,x2,y2,rand(),rand(),rand());
+        }
+
+        GL.FillRectangle(100,100,400,400,255,0,255);
+        GL.DrawRectangle(100,100,400,400,0,0,0);
+
+        const int r = 8 + (anim%250);
+        GL.FillCircle(500,200,r,255,255,255);
+        GL.DrawCircle(500,200,r,0,0,0);
+
+        GL.FillRectangle(300,300,700,550,0,255,255,100);
+        GL.DrawRectangle(300,300,700,550,0,0,0);
+
+        GL.DrawRoundedRectangle(450,450,800,550,20,255,255,255);
+        GL.FillRoundedRectangle(450,450,800,550,10,255,255,0,100);
+
+        GL.EndFrame();
 
     }
 

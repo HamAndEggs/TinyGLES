@@ -143,7 +143,11 @@ GLES::GLES(bool pVerbose) :
 
 GLES::~GLES()
 {
-
+	Clear(0,0,0);
+	eglSwapBuffers(mDisplay,mSurface);
+    eglDestroyContext(mDisplay, mContext);
+    eglDestroySurface(mDisplay, mSurface);
+    eglTerminate(mDisplay);
 }
 
 bool GLES::BeginFrame()
@@ -236,6 +240,19 @@ void GLES::OnApplicationExitRequest()
 
 //*******************************************
 // Primitive draw commands.
+void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	const int16_t quad[4] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY};
+
+	mShaders.ColourOnly->Enable(mMatrices.projection);
+	mShaders.ColourOnly->SetTransformIdentity();
+	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+
+	VertexPtr(2,GL_SHORT,4,quad);
+	glDrawArrays(GL_LINES,0,2);
+	CHECK_OGL_ERRORS();
+}
+
 void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,int pNumPoints,bool pFilled)
 {
 	if( pNumPoints < 1 )
@@ -257,8 +274,8 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	const float y = (float)pCenterY;
 	for( int n = 0 ; n < pNumPoints ; n++, rad += step )
 	{
-		m2DWorkSpace[n].x = pCenterX - (r*std::sin(rad));
-		m2DWorkSpace[n].y = pCenterY + (r*std::cos(rad));
+		m2DWorkSpace[n].x = x - (r*std::sin(rad));
+		m2DWorkSpace[n].y = y + (r*std::cos(rad));
 	}
 
 	mShaders.ColourOnly->Enable(mMatrices.projection);
@@ -282,6 +299,71 @@ void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,4);
 	CHECK_OGL_ERRORS();
 }
+
+void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled)
+{
+    int numPoints = (int)(7 + (std::sqrt(pRadius)*3));
+
+	// Need a multiple of 4 points.
+	numPoints = (numPoints+3)&~3;
+
+	// Make sure we don't go too far.
+	if( numPoints > m2DWorkSpace.size() )
+	{
+		numPoints = m2DWorkSpace.size();
+	}
+
+	float rad = GetRadian();
+	const float step = GetRadian() / (float)(numPoints-1);
+	const float r = (float)pRadius;
+	Vec2D* p = m2DWorkSpace.data();
+
+	pToX -= pRadius;
+	pToY -= pRadius;
+	pFromX += pRadius;
+	pFromY += pRadius;
+
+	for( int n = 0 ; n < numPoints/4 ; n++ )
+	{
+		p->x = pFromX + (r*std::sin(rad));
+		p->y = pToY + (r*std::cos(rad));
+		p++;
+		rad -= step;
+	}
+
+	for( int n = 0 ; n < numPoints/4 ; n++ )
+	{
+		p->x = pFromX + (r*std::sin(rad));
+		p->y = pFromY + (r*std::cos(rad));
+		p++;
+		rad -= step;
+	}
+
+	for( int n = 0 ; n < numPoints/4 ; n++ )
+	{
+		p->x = pToX + (r*std::sin(rad));
+		p->y = pFromY + (r*std::cos(rad));
+		p++;
+		rad -= step;
+	}
+
+	for( int n = 0 ; n < numPoints/4 ; n++ )
+	{
+		p->x = pToX + (r*std::sin(rad));
+		p->y = pToY + (r*std::cos(rad));
+		p++;
+		rad -= step;
+	}
+
+	mShaders.ColourOnly->Enable(mMatrices.projection);
+	mShaders.ColourOnly->SetTransformIdentity();
+	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+
+	VertexPtr(2,GL_FLOAT,8,m2DWorkSpace.data());
+	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,numPoints);
+	CHECK_OGL_ERRORS();
+}
+
 
 //*******************************************
 // End of primitive draw commands.
