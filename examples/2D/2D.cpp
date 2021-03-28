@@ -3,6 +3,8 @@
 
 #include <iostream>
 
+#include <unistd.h>
+
 int main(int argc, char *argv[])
 {
 // Say hello to the world!
@@ -16,9 +18,26 @@ int main(int argc, char *argv[])
 
     tinygles::GLES theDisplay(true);
 
+    int n = 0;
     while( theDisplay.BeginFrame() )
     {
+        theDisplay.Clear(0,0,0);
+
+        for(int n = 0 ; n < 32 ; n++ )
+        {
+            int w = 8 + (rand()&127);
+            int h = 8 + (rand()&127);
+
+            int x = rand()%(theDisplay.GetWidth()-w);
+            int y = rand()%(theDisplay.GetHeight()-h);
+
+            theDisplay.FillRectangle(x,y,x+w,y+h,rand(),rand(),rand());
+        }
+
+        theDisplay.FillRectangle(100,100,400,400,255,0,255);
+
         theDisplay.EndFrame();
+
     }
 
 // And quit\n";

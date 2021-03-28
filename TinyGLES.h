@@ -22,14 +22,24 @@
 #define TINY_GLES_H
 
 #include <functional>
+#include <memory>
+#include <cmath>
 
 #include <signal.h>
 
-#define EGL_EGLEXT_PROTOTYPES
-#include <GLES2/gl2.h>	//sudo apt install libgles2-mesa-dev
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <gbm.h> //sudo apt install libgbm-dev see https://packages.debian.org/sid/libgbm-dev
+#ifdef PLATFORM_GLES
+	#include "GLES2/gl2.h" //sudo apt install libgles2-mesa-dev
+	#include "EGL/egl.h"
+	#include <gbm.h> //sudo apt install libgbm-dev
+#endif
+
+#ifdef PLATFORM_BROADCOM_GLES
+// All included from /opt/vc/include
+	#include "GLES2/gl2.h"
+	#include "EGL/egl.h"
+	#include "bcm_host.h"
+#endif
+
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -68,6 +78,24 @@ struct SystemEventData
 	}mPointer;
 
 	SystemEventData(SystemEventType pType) : mType(pType){}
+};
+
+// Forward decleration of internal type.
+struct GLShader;
+
+constexpr float GetPI()
+{
+	return std::acos(-1);
+}
+
+constexpr float DegreeToRadian(float pDegree)
+{
+	return pDegree * (GetPI()/180.0f);
+}
+
+struct Matrix4x4
+{
+	float m[4][4];
 };
 
 /**
@@ -111,6 +139,11 @@ public:
 	int GetHeight()const{return mHeight;}
 
 	/**
+	 * @brief Get the Display Aspect Ratio
+	 */
+	float GetDisplayAspectRatio()const{return (float)mWidth/(float)mHeight;}
+
+	/**
 	 * @brief Marks the start of the frame, normally called in the while of a loop to create the render loop.
 	 * @return true All is ok, so keep running.
 	 * @return false Either the user requested an exit with ctrl+c or there was an error.
@@ -126,6 +159,16 @@ public:
 	 * @brief Clears the screen to the colour passed.
 	 */
 	void Clear(uint8_t pRed,uint8_t pGreen,uint8_t pBlue);
+
+	/**
+	 * @brief Set the Frustum for 2D rending. This is the default mode, you only need to call it if you're mixed 3D with 2D.
+	 */
+	void SetFrustum2D();
+
+	/**
+	 * @brief Set the view frustum for 3D rendering
+	 */
+	void SetFrustum3D(float pFov, float pAspect, float pNear, float pFar);
 
 	/**
 	 * @brief Sets the flag for the main loop to false and fires the SYSTEM_EVENT_EXIT_REQUEST
@@ -145,12 +188,29 @@ public:
 	 */
 	void SetSystemEventHandler(SystemEventHandler pEventHandler){mSystemEventHandler = pEventHandler;}
 
+//*******************************************
+// Primitive draw commands.
+	void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
+
 private:
+	enum struct StreamIndex
+	{
+		VERTEX				= 0,		//!< Vertex positional data.
+		TEXCOORD			= 1,		//!< Texture coordinate information.
+		COLOUR				= 2,		//!< Colour type is in the format RGBA.
+	};
+
 
 	/**
 	 * @brief Check for system events that the application my want.
 	 */
 	void ProcessSystemEvents();
+
+	/**
+	 * @brief Gets the display of the screen, done like this as using GLES / EGL seems to have many different ways of doing it. A bit annoying.
+	 * 
+	 */
+	void FetchDisplayMode();
 
 	/**
 	 * @brief Gets the ball rolling by finding the initialsizeing the display.
@@ -174,28 +234,38 @@ private:
 	void SetRenderingDefaults();
 
 	/**
-	 * @brief For debug and when verbose mode is on will display errors coming from GLES.
-	 * In debug and verbose is false, will say the error once.
-	 * In release code is not included as checking errors all the time can stall the pipeline.
-	 * @param pSource_file_name 
-	 * @param pLine_number 
+	 * @brief Build the shaders that we need for basic rendering. If you need more copy the code and go multiply :)
 	 */
-#ifdef DEBUG_BUILD	
-	void ReadOGLErrors(const char *pSource_file_name,int pLine_number);
-#endif
+	void BuildShaders();
+
+	void VertexPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer);
+	void TexCoordPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer);
+	void ColourPtr(GLint pNum_coord, GLsizei pStride,const uint8_t* pPointer);
+	void SetUserSpaceStreamPtr(StreamIndex pStream,GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer);
+
+	void DrawArray(GLenum pType, GLint pStart, GLsizei pCount);
 
 	const bool mVerbose;
 
 	int mWidth = 0;
 	int mHeight = 0;
 
-	struct gbm_device *mGDMDevice = nullptr;
+#if defined PLATFORM_GLES || defined PLATFORM_BROADCOM_GLES
 	EGLDisplay mDisplay = nullptr;				//!<GL display
 	EGLSurface mSurface = nullptr;				//!<GL rendering surface
 	EGLContext mContext = nullptr;				//!<GL rendering context
 	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
     EGLint mMajorVersion = 0;					//!<Major version number of GLES we are running on.
 	EGLint mMinorVersion = 0;					//!<Minor version number of GLES we are running on.
+#endif
+
+#ifdef PLATFORM_BROADCOM_GLES
+    EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
+#endif
+
+#ifdef PLATFORM_GLES // sudo apt install libgles2-mesa-dev
+	EGLNativeWindowType mNativeWindow;
+#endif	
 
 	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.
 	bool mKeepGoing = true; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
@@ -216,6 +286,16 @@ private:
 			int y = 0;
 		}mCurrent;
 	}mPointer;
+
+	struct
+	{
+		std::unique_ptr<GLShader> ColourOnly;
+	}mShaders;
+
+	struct
+	{
+		Matrix4x4 projection;
+	}mMatrices;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Code to deal with CTRL + C
