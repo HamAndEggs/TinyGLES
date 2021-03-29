@@ -24,6 +24,7 @@
 #include <functional>
 #include <memory>
 #include <cmath>
+#include <set>
 
 #include <signal.h>
 
@@ -216,9 +217,9 @@ public:
 	/**
 	 * @brief Draws a rectangle with the passed in RGB values either filled or not.
 	 */
-	void Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled);
-	inline void DrawRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,false);}
-	inline void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,true);}
+	void Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled,uint32_t pTexture);
+	inline void DrawRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,uint32_t pTexture = 0){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,false,pTexture);}
+	inline void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,uint32_t pTexture = 0){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,true,pTexture);}
 
 	/**
 	 * @brief Draws a rectangle with rounder corners in the passed in RGB values either filled or not.
@@ -226,6 +227,22 @@ public:
 	void RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled);
 	inline void DrawRoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){RoundedRectangle(pFromX,pFromY,pToX,pToY,pRadius,pRed,pGreen,pBlue,pAlpha,false);}
 	inline void FillRoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){RoundedRectangle(pFromX,pFromY,pToX,pToY,pRadius,pRed,pGreen,pBlue,pAlpha,true);}
+
+//*******************************************
+// Texture commands.
+	/**
+	 * @brief Create a Texture object with the size passed in and a given name. 
+	 * pPixels is either RGB format 24bit or RGBA 32bit format is pHasAlpha is true.
+	 */
+	uint32_t CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha = false,bool pGenerateMipmaps = false,bool pFiltered = false);
+	inline uint32_t CreateTextureRGB(int pWidth,int pHeight,const uint8_t* pPixels){return CreateTexture(pWidth,pHeight,pPixels,false,false,false);}
+	inline uint32_t CreateTextureRGBA(int pWidth,int pHeight,const uint8_t* pPixels){return CreateTexture(pWidth,pHeight,pPixels,true,false,false);}
+
+	/**
+	 * @brief Delete the texture, will throw an exception is texture not found.
+	 * All textures are deleted when the GLES context is torn down so you only need to use this if you need to reclaim some memory.
+	 */
+	void DeleteTexture(uint32_t pTexture);
 
 private:
 	enum struct StreamIndex
@@ -302,6 +319,14 @@ private:
 	bool mKeepGoing = true; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
 
 	/**
+	 * @brief To make code path simpler, we always texture everything, even with white.
+	 * If you want uber speed go use a different GLES engine or change this one.
+	 * Our goal is minimal code paths.
+	 */
+	uint32_t mTextureWhite; 
+	std::set<uint32_t> mTextures; //!< Our textures
+
+	/**
 	 * @brief Information about the mouse driver
 	 */
 	struct
@@ -321,6 +346,7 @@ private:
 	struct
 	{
 		std::unique_ptr<GLShader> ColourOnly;
+		std::unique_ptr<GLShader> TextureColour;
 	}mShaders;
 
 	struct

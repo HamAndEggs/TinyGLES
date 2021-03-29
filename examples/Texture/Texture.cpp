@@ -1,3 +1,4 @@
+#include "TinyGLES.h"
 
 #include <iostream>
 
@@ -12,6 +13,22 @@ int main(int argc, char *argv[])
     std::cout << "Build date " << APP_BUILD_DATE << '\n';
     std::cout << "Build time " << APP_BUILD_TIME << '\n';
 
-// And quit\n";
+    tinygles::GLES GL(true);
+
+    int anim = 0;
+    std::cout << "Starting render loop\n";
+    while( GL.BeginFrame() )
+    {
+        anim++;
+        GL.Clear(0,0,0);
+
+        GL.FillRoundedRectangle(50,50,950,550,100,55,20,155);
+        GL.DrawRoundedRectangle(50,50,950,550,100,255,255,255);
+
+
+        GL.EndFrame();
+
+    }
+
     return EXIT_SUCCESS;
 }

@@ -3,8 +3,6 @@
 
 #include <iostream>
 
-#include <unistd.h>
-
 int main(int argc, char *argv[])
 {
 // Say hello to the world!
@@ -77,6 +75,6 @@ int main(int argc, char *argv[])
 
     }
 
-// And quit\n";
+// And quit
     return EXIT_SUCCESS;
 }

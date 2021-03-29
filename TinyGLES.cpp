@@ -22,6 +22,7 @@
 #include <stdexcept>
 
 #include <math.h>
+#include <string.h>
 #include <assert.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -81,7 +82,7 @@ struct GLShader
 	void SetTransformIdentity();
 	void SetGlobalColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha);
 	void SetGlobalColour(float red,float green,float blue,float alpha);
-	void SetTexture(int index,GLint texture);
+	void SetTexture(GLint texture);
 
 
 private:
@@ -138,11 +139,23 @@ GLES::GLES(bool pVerbose) :
 	SetRenderingDefaults();
 	BuildShaders();
 
+	// Make default white texture.
+	VERBOSE_MESSAGE("Creating default white texture");
+	uint8_t white[16*16*4];
+	memset(white,0xff,sizeof(white));
+	mTextureWhite = CreateTextureRGBA(16,16,white);
+
 	CHECK_OGL_ERRORS();
 }
 
 GLES::~GLES()
 {
+	// delete all textures.
+	for( auto t : mTextures )
+	{
+		glDeleteTextures(1,(GLuint*)&t);
+	}
+
 	Clear(0,0,0);
 	eglSwapBuffers(mDisplay,mSurface);
     eglDestroyContext(mDisplay, mContext);
@@ -244,6 +257,7 @@ void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGr
 {
 	const int16_t quad[4] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY};
 
+	assert(mShaders.ColourOnly);
 	mShaders.ColourOnly->Enable(mMatrices.projection);
 	mShaders.ColourOnly->SetTransformIdentity();
 	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
@@ -278,6 +292,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 		m2DWorkSpace[n].y = y + (r*std::cos(rad));
 	}
 
+	assert(mShaders.ColourOnly);
 	mShaders.ColourOnly->Enable(mMatrices.projection);
 	mShaders.ColourOnly->SetTransformIdentity();
 	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
@@ -287,13 +302,25 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	CHECK_OGL_ERRORS();
 }
 
-void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled)
+void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled,uint32_t pTexture)
 {
 	const int16_t quad[8] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY,(int16_t)pFromX,(int16_t)pToY};
 
-	mShaders.ColourOnly->Enable(mMatrices.projection);
-	mShaders.ColourOnly->SetTransformIdentity();
-	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+	if( pTexture > 0 )
+	{
+		assert(mShaders.TextureColour);
+		mShaders.TextureColour->Enable(mMatrices.projection);
+		mShaders.TextureColour->SetTransformIdentity();
+		mShaders.TextureColour->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+		mShaders.TextureColour->SetTexture(pTexture);
+	}
+	else
+	{
+		assert(mShaders.ColourOnly);
+		mShaders.ColourOnly->Enable(mMatrices.projection);
+		mShaders.ColourOnly->SetTransformIdentity();
+		mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+	}
 
 	VertexPtr(2,GL_SHORT,4,quad);
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,4);
@@ -355,6 +382,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 		rad -= step;
 	}
 
+	assert(mShaders.ColourOnly);
 	mShaders.ColourOnly->Enable(mMatrices.projection);
 	mShaders.ColourOnly->SetTransformIdentity();
 	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
@@ -364,9 +392,114 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 	CHECK_OGL_ERRORS();
 }
 
+// End of primitive draw commands.
+//*******************************************
 
 //*******************************************
-// End of primitive draw commands.
+// Texture commands.
+uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha,bool pGenerateMipmaps,bool pFiltered)
+{
+	if(pPixels == NULL )
+	{
+		throw std::runtime_error("CreateTexture passed with nullptr pixels");
+	}
+
+	if(pWidth < 1 || pHeight < 1 )
+	{
+		throw std::runtime_error("CreateTexture passed bad size, " + std::to_string(pWidth) + "x" + std::to_string(pHeight));
+	}
+
+	GLint format = pHasAlpha?GL_RGBA:GL_RGB;
+	GLint gl_format = GL_UNSIGNED_BYTE;
+
+	GLuint tex;
+	glGenTextures(1,&tex);
+	CHECK_OGL_ERRORS();
+	if( tex == 0 )
+	{
+		throw std::runtime_error("Failed to create texture, glGenTextures returned zero");
+	}
+
+	if( mTextures.find(tex) != mTextures.end() )
+	{
+		throw std::runtime_error("Bug found in GLES code, glGenTextures returned an index that we already know about.");
+	}
+	mTextures.insert(tex);
+
+	glBindTexture(GL_TEXTURE_2D,tex);
+	CHECK_OGL_ERRORS();
+
+	glTexImage2D(
+		GL_TEXTURE_2D,
+		0,
+		format,
+		pWidth,
+		pHeight,
+		0,
+		format,
+		gl_format,
+		pPixels);
+
+	CHECK_OGL_ERRORS();
+
+	//Unlike GLES 1.1 this is called after texture creation, in GLES 1.1 you say that you want glTexImage2D to make the mips.
+	if( pGenerateMipmaps )
+	{
+		glGenerateMipmap(GL_TEXTURE_2D);
+		CHECK_OGL_ERRORS();
+		if( pFiltered )
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		}
+		else
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		}
+	}
+	else
+	{
+		if( pFiltered )
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		}
+		else
+		{
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		}
+	}
+
+	CHECK_OGL_ERRORS();
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+	glBindTexture(GL_TEXTURE_2D,0);//Because we had to change it to setup the texture! Stupid GL!
+	CHECK_OGL_ERRORS();
+
+	VERBOSE_MESSAGE("Texture " << tex << " created");
+
+
+	return tex;
+}
+
+/**
+ * @brief Delete the texture, will throw an exception is texture not found.
+ * All textures are deleted when the GLES context is torn down so you only need to use this if you need to reclaim some memory.
+ */
+void GLES::DeleteTexture(uint32_t pTexture)
+{
+	if( mTextures.find(pTexture) != mTextures.end() )
+	{
+		glDeleteTextures(1,(GLuint*)&pTexture);
+		mTextures.erase(pTexture);
+	}
+}
+
+// End of Texture commands.
+//*******************************************
 
 void GLES::ProcessSystemEvents()
 {
@@ -634,6 +767,34 @@ void GLES::BuildShaders()
 	)";
 
 	mShaders.ColourOnly = std::make_unique<GLShader>("ColourOnly",ColourOnly_VS,ColourOnly_PS,mVerbose);
+
+	const char* TextureColour_VS = R"(
+		uniform mat4 u_proj_cam;
+		uniform mat4 u_trans;
+		uniform vec4 u_global_colour;
+		attribute vec4 a_xyz;
+		attribute vec2 a_uv0;
+		varying vec4 v_col;
+		varying vec2 v_tex0;
+		void main(void)
+		{
+			v_col = u_global_colour;
+			v_tex0 = a_uv0;
+			gl_Position = u_proj_cam * (u_trans * a_xyz);
+		}
+	)";
+
+	const char *TextureColour_PS = R"(
+		varying vec4 v_col;
+		varying vec2 v_tex0;
+		uniform sampler2D u_tex0;
+		void main(void)
+		{
+			gl_FragColor = v_col * texture2D(u_tex0,v_tex0);
+		}
+	)";
+
+	mShaders.TextureColour = std::make_unique<GLShader>("TextureColour",TextureColour_VS,TextureColour_PS,mVerbose);	
 }
 
 void GLES::VertexPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer)
@@ -787,6 +948,8 @@ int GLShader::GetUniformLocation(const char* pName)
 		VERBOSE_MESSAGE("Shader: " << mName << " Failed to find UniformLocation " << pName);
 	}
 
+	VERBOSE_MESSAGE("Shader: " << mName << " GetUniformLocation(" << pName << ") == " << location);
+
 	return location;
 
 }
@@ -808,7 +971,7 @@ void GLShader::Enable(const Matrix4x4& projInvcam)
     glUniformMatrix4fv(mUniforms.proj_cam, 1, false,(const float*)projInvcam.m);
     CHECK_OGL_ERRORS();
 
-    if( mUniforms.tex0 > 0 )
+    if( mUniforms.tex0 > -1 )
     {
     	glActiveTexture(GL_TEXTURE0);
     	glUniform1i(mUniforms.tex0,0);
@@ -857,9 +1020,9 @@ void GLShader::SetGlobalColour(float pRed,float pGreen,float pBlue,float pAlpha)
 	glUniform4f(mUniforms.global_colour,pRed,pGreen,pBlue,pAlpha);
 }
 
-void GLShader::SetTexture(int index,GLint texture)
+void GLShader::SetTexture(GLint texture)
 {
-	glActiveTexture(GL_TEXTURE0 + index);
+	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D,texture);
 	glUniform1i(mUniforms.tex0,0);
 }
