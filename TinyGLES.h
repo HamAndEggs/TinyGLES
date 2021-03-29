@@ -25,8 +25,10 @@
 #include <memory>
 #include <cmath>
 #include <set>
+#include <vector>
 
 #include <signal.h>
+#include <assert.h>
 
 #include "GLES2/gl2.h" //sudo apt install libgles2-mesa-dev
 #include "EGL/egl.h"
@@ -257,6 +259,18 @@ public:
 	 */
 	uint32_t GetDebugTexture()const{return mDebugTexture;}
 
+	/**
+	 * @brief Get the Pixel Font Texture object
+	 */
+	uint32_t GetPixelFontTexture()const{return mPixelFont.texture;}
+
+//*******************************************
+// Pixel font, low res, mainly for debugging.
+	void FontPrint(int pX,int pY,const char* pText);
+	void FontPrintf(int pX,int pY,const char* pFmt,...);
+	void FontSetScale(int pScale){assert(pScale>0);mPixelFont.scale = pScale;}
+	void FontSetColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue){mPixelFont.R = pRed;mPixelFont.G = pGreen;mPixelFont.B = pBlue;}
+
 private:
 
 	/**
@@ -296,6 +310,9 @@ private:
 	 */
 	void BuildShaders();
 
+	void BuildDebugTexture();
+	void BuildPixelFontTexture();
+
 	void VertexPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer);
 	void TexCoordPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer);
 	void ColourPtr(GLint pNum_coord, GLsizei pStride,const uint8_t* pPointer);
@@ -327,8 +344,17 @@ private:
 	/**
 	 * @brief A handy texture used in debugging. 16x16 check board.
 	 */
-	uint32_t mDebugTexture; 
+	uint32_t mDebugTexture = 0;
+
 	std::set<uint32_t> mTextures; //!< Our textures
+
+	static const std::vector<uint32_t> mFont16x16Data;	//!< used to rebuild font texture.
+	struct
+	{
+		uint32_t texture = 0; //!< The texture used for rendering the pixel font.
+		uint8_t R = 255,G = 255,B = 255;
+		int scale = 1;
+	}mPixelFont;
 
 	/**
 	 * @brief Information about the mouse driver
