@@ -415,7 +415,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 
 //*******************************************
 // Texture commands.
-uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha,bool pGenerateMipmaps,bool pFiltered)
+uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha,bool pFiltered,bool pGenerateMipmaps)
 {
 	if(pPixels == NULL )
 	{
@@ -497,7 +497,7 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool 
 	glBindTexture(GL_TEXTURE_2D,0);//Because we had to change it to setup the texture! Stupid GL!
 	CHECK_OGL_ERRORS();
 
-	VERBOSE_MESSAGE("Texture " << tex << " created");
+	VERBOSE_MESSAGE("Texture " << tex << " created Mipmaps " << (pGenerateMipmaps?"true":"false") << " Filtered " << (pFiltered?"true":"false"));
 
 
 	return tex;
@@ -509,6 +509,11 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool 
  */
 void GLES::DeleteTexture(uint32_t pTexture)
 {
+	if( pTexture == mDebugTexture )
+	{
+		throw std::runtime_error("An attempt was made to delete the debug texture, do not do this!");
+	}
+
 	if( mTextures.find(pTexture) != mTextures.end() )
 	{
 		glDeleteTextures(1,(GLuint*)&pTexture);

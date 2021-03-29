@@ -225,8 +225,9 @@ public:
 	 * @brief Draws a rectangle with the passed in RGB values either filled or not.
 	 */
 	void Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled,uint32_t pTexture);
-	inline void DrawRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,uint32_t pTexture = 0){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,false,pTexture);}
+	inline void DrawRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,false,0);}
 	inline void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,uint32_t pTexture = 0){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,true,pTexture);}
+	inline void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint32_t pTexture = 0){Rectangle(pFromX,pFromY,pToX,pToY,255,255,255,255,true,pTexture);}
 
 	/**
 	 * @brief Draws a rectangle with rounder corners in the passed in RGB values either filled or not.
@@ -241,15 +242,20 @@ public:
 	 * @brief Create a Texture object with the size passed in and a given name. 
 	 * pPixels is either RGB format 24bit or RGBA 32bit format is pHasAlpha is true.
 	 */
-	uint32_t CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha = false,bool pGenerateMipmaps = false,bool pFiltered = false);
-	inline uint32_t CreateTextureRGB(int pWidth,int pHeight,const uint8_t* pPixels){return CreateTexture(pWidth,pHeight,pPixels,false,false,false);}
-	inline uint32_t CreateTextureRGBA(int pWidth,int pHeight,const uint8_t* pPixels){return CreateTexture(pWidth,pHeight,pPixels,true,false,false);}
+	uint32_t CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha = false,bool pFiltered = false,bool pGenerateMipmaps = false);
+	inline uint32_t CreateTextureRGB(int pWidth,int pHeight,const uint8_t* pPixels,bool pFiltered = false,bool pGenerateMipmaps = false){return CreateTexture(pWidth,pHeight,pPixels,false,pFiltered,pGenerateMipmaps);}
+	inline uint32_t CreateTextureRGBA(int pWidth,int pHeight,const uint8_t* pPixels,bool pFiltered = false,bool pGenerateMipmaps = false){return CreateTexture(pWidth,pHeight,pPixels,true,pFiltered,pGenerateMipmaps);}
 
 	/**
 	 * @brief Delete the texture, will throw an exception is texture not found.
 	 * All textures are deleted when the GLES context is torn down so you only need to use this if you need to reclaim some memory.
 	 */
 	void DeleteTexture(uint32_t pTexture);
+
+	/**
+	 * @brief Get the Debug Texture for use to help with finding issues.
+	 */
+	uint32_t GetDebugTexture()const{return mDebugTexture;}
 
 private:
 

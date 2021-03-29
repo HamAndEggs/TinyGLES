@@ -4,24 +4,24 @@
 #include <iostream>
 #include <assert.h>
 
-static uint32_t LoadTexture(tinygles::GLES &GL,const char* pFilename)
+static uint32_t LoadTexture(tinygles::GLES &GL,const char* pFilename,bool pFiltered)
 {
         // Load in a test texture
     uint32_t textureHandle = 0;
-    tinypng::Loader png(true);
+    tinypng::Loader png(false);
     if( png.LoadFromFile(pFilename) )
     {
         if( png.GetHasAlpha() )
         {
             std::vector<uint8_t> RGBA;
             png.GetRGBA(RGBA);
-            textureHandle = GL.CreateTextureRGBA(png.GetWidth(),png.GetHeight(),RGBA.data());
+            textureHandle = GL.CreateTextureRGBA(png.GetWidth(),png.GetHeight(),RGBA.data(),pFiltered);
         }
         else
         {
             std::vector<uint8_t> RGB;
             png.GetRGB(RGB);
-            textureHandle = GL.CreateTextureRGB(png.GetWidth(),png.GetHeight(),RGB.data());
+            textureHandle = GL.CreateTextureRGB(png.GetWidth(),png.GetHeight(),RGB.data(),pFiltered);
         }
     }
     assert(textureHandle);
@@ -43,22 +43,27 @@ int main(int argc, char *argv[])
     tinygles::GLES GL(true);
 
     // Load in a test texture
-    uint32_t create = LoadTexture(GL,"crate.png");
-    uint32_t plant = LoadTexture(GL,"plant.png");
+    uint32_t create = LoadTexture(GL,"crate.png",false);
+    uint32_t plant = LoadTexture(GL,"plant.png",false);
+    uint32_t debug1 = LoadTexture(GL,"debug.png",true);
+    uint32_t debug2 = LoadTexture(GL,"debug2.png",true);
 
     int anim = 0;
     std::cout << "Starting render loop\n";
     while( GL.BeginFrame() )
     {
         anim++;
-        GL.Clear(0,0,0);
+
+        GL.FillRectangle(0,0,GL.GetWidth(),GL.GetHeight(),GL.GetDebugTexture());
 
         GL.FillRoundedRectangle(50,50,950,550,100,55,20,155);
         GL.DrawRoundedRectangle(50,50,950,550,100,255,255,255);
 
-        GL.FillRectangle(100,100,400,400,255,255,255,255,create);
-        GL.FillRectangle(500,100,800,400,255,255,255,255,plant);
+        GL.FillRectangle(100,100,200,200,create);
+        GL.FillRectangle(300,100,400,200,plant);
 
+        GL.FillRectangle(100,300,300,500,debug1);
+        GL.FillRectangle(400,300,600,500,debug2);
 
         GL.EndFrame();
 
