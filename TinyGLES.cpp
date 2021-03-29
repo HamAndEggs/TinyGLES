@@ -50,9 +50,6 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 
 #define VERBOSE_MESSAGE(THE_MESSAGE__)	{if(mVerbose){std::clog << THE_MESSAGE__ << "\n";}}
 
-#define ATTRIB_POS 0
-#define ATTRIB_COLOUR 1
-#define ATTRIB_UV0 2
 
 struct Quad3D
 {
@@ -139,11 +136,26 @@ GLES::GLES(bool pVerbose) :
 	SetRenderingDefaults();
 	BuildShaders();
 
-	// Make default white texture.
-	VERBOSE_MESSAGE("Creating default white texture");
-	uint8_t white[16*16*4];
-	memset(white,0xff,sizeof(white));
-	mTextureWhite = CreateTextureRGBA(16,16,white);
+
+	VERBOSE_MESSAGE("Creating mDebugTexture");
+	uint8_t pixels[16*16*4];
+	uint8_t* dst = pixels;
+	for( int y = 0 ; y < 16 ; y++ )
+	{
+		for( int x = 0 ; x < 16 ; x++ )
+		{
+			if( (x&1) == (y&1) )
+			{
+				dst[0] = 255;dst[1] = 0;dst[2] = 255;dst[3] = 255;
+			}
+			else
+			{
+				dst[0] = 0;dst[1] = 255;dst[2] = 0;dst[3] = 255;
+			}
+			dst+=4;
+		}
+	}
+	mDebugTexture = CreateTextureRGBA(16,16,pixels);
 
 	CHECK_OGL_ERRORS();
 }
@@ -305,6 +317,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled,uint32_t pTexture)
 {
 	const int16_t quad[8] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY,(int16_t)pFromX,(int16_t)pToY};
+	const int16_t uv[8] = {0,0,1,0,1,1,0,1};
 
 	if( pTexture > 0 )
 	{
@@ -313,6 +326,10 @@ void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_
 		mShaders.TextureColour->SetTransformIdentity();
 		mShaders.TextureColour->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 		mShaders.TextureColour->SetTexture(pTexture);
+
+		glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
+		TexCoordPtr(2,GL_SHORT,4,uv);
+
 	}
 	else
 	{
@@ -320,6 +337,7 @@ void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_
 		mShaders.ColourOnly->Enable(mMatrices.projection);
 		mShaders.ColourOnly->SetTransformIdentity();
 		mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+		glDisableVertexAttribArray((int)StreamIndex::TEXCOORD);
 	}
 
 	VertexPtr(2,GL_SHORT,4,quad);
@@ -834,15 +852,13 @@ void GLES::SetUserSpaceStreamPtr(StreamIndex pStream,GLint pNum_coord, GLenum pT
 		throw std::runtime_error("SetUserSpaceStreamPtr passed invlaid stream index " + std::to_string((int)pStream));
 	}
 
-	//Make sure no bad code has left one of these bound.
-	glBindBuffer(GL_ARRAY_BUFFER,0);
-
 	glVertexAttribPointer(
 				(GLuint)pStream,
 				pNum_coord,
 				pType,
 				pType == GL_BYTE,
 				pStride,pPointer);
+	CHECK_OGL_ERRORS();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -892,9 +908,9 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 	CHECK_OGL_ERRORS();
 	//Set the input stream numbers.
 	//Has to be done before linking.
-	BindAttribLocation(ATTRIB_POS, "a_xyz");
-	BindAttribLocation(ATTRIB_COLOUR, "a_col");
-	BindAttribLocation(ATTRIB_UV0, "a_uv0");
+	BindAttribLocation((int)StreamIndex::VERTEX, "a_xyz");
+	BindAttribLocation((int)StreamIndex::TEXCOORD, "a_uv0");
+//	BindAttribLocation((int)StreamIndex::COLOUR, "a_col");
 
 
 	glLinkProgram(mShader); // creates OpenGL program executables
@@ -970,12 +986,6 @@ void GLShader::Enable(const Matrix4x4& projInvcam)
 
     glUniformMatrix4fv(mUniforms.proj_cam, 1, false,(const float*)projInvcam.m);
     CHECK_OGL_ERRORS();
-
-    if( mUniforms.tex0 > -1 )
-    {
-    	glActiveTexture(GL_TEXTURE0);
-    	glUniform1i(mUniforms.tex0,0);
-    }
 }
 
 void GLShader::SetTransform(Matrix4x4& transform)
@@ -1013,6 +1023,7 @@ void GLShader::SetGlobalColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t
 		ColourToFloat(pBlue),
 		ColourToFloat(pAlpha)
 	);
+	CHECK_OGL_ERRORS();
 }
 
 void GLShader::SetGlobalColour(float pRed,float pGreen,float pBlue,float pAlpha)
@@ -1025,6 +1036,7 @@ void GLShader::SetTexture(GLint texture)
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D,texture);
 	glUniform1i(mUniforms.tex0,0);
+	CHECK_OGL_ERRORS();
 }
 
 int GLShader::LoadShader(int type, const char* shaderCode)

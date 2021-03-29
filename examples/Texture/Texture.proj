@@ -1,6 +1,7 @@
 {
     "source_files": [
         "Texture.cpp",
+        "TinyPNG.cpp",
         "../../TinyGLES.cpp"
     ],
    "configurations":
@@ -21,7 +22,8 @@
                 "m",
                 "brcmGLESv2",
                 "brcmEGL",
-                "bcm_host"
+                "bcm_host",
+                "z"
             ],
             "libpaths":
             [
@@ -46,7 +48,8 @@
                 "pthread",
                 "m",
                 "GLESv2",
-                "EGL"
+                "EGL",
+                "z"
             ],
             "libpaths":
             [

@@ -57,6 +57,13 @@ enum SystemEventType
 	SYSTEM_EVENT_POINTER_UP
 };
 
+enum struct StreamIndex
+{
+	VERTEX				= 0,		//!< Vertex positional data.
+	TEXCOORD			= 1,		//!< Texture coordinate information.
+	COLOUR				= 2,		//!< Colour type is in the format RGBA.
+};
+
 /**
  * @brief The data relating to a system event.
  * I've implemented some very basic events. Not going to over do it. Just passes on some common ones.
@@ -245,13 +252,6 @@ public:
 	void DeleteTexture(uint32_t pTexture);
 
 private:
-	enum struct StreamIndex
-	{
-		VERTEX				= 0,		//!< Vertex positional data.
-		TEXCOORD			= 1,		//!< Texture coordinate information.
-		COLOUR				= 2,		//!< Colour type is in the format RGBA.
-	};
-
 
 	/**
 	 * @brief Check for system events that the application my want.
@@ -319,11 +319,9 @@ private:
 	bool mKeepGoing = true; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
 
 	/**
-	 * @brief To make code path simpler, we always texture everything, even with white.
-	 * If you want uber speed go use a different GLES engine or change this one.
-	 * Our goal is minimal code paths.
+	 * @brief A handy texture used in debugging. 16x16 check board.
 	 */
-	uint32_t mTextureWhite; 
+	uint32_t mDebugTexture; 
 	std::set<uint32_t> mTextures; //!< Our textures
 
 	/**
