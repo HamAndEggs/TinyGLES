@@ -15,26 +15,18 @@ int main(int argc, char *argv[])
 
     tinygles::GLES GL(true);
 
+    tinygles::FreeTypeFont FTFont("./Blenda Script.otf",40,true);
+
     int anim = 0;
     while( GL.BeginFrame() )
     {
         anim++;
-        GL.Clear(0,0,0);
+        GL.Clear(40,20,60);
 
         GL.FillRoundedRectangle(50,50,GL.GetWidth()-50,GL.GetHeight()-50,100,55,20,155);
         GL.DrawRoundedRectangle(50,50,GL.GetWidth()-50,GL.GetHeight()-50,100,255,255,255);
 
-        GL.FontSetScale(1);
-        GL.FontPrint(80,80,"Hello World");
-        GL.FontPrint(80,120,"XVZBHYWQ");
-        GL.FontPrintf(80,160,"Count: %d",anim++);
-
-        GL.FontSetScale(5);
-        GL.FontPrint(80,200,"Hello World");
-        GL.FontPrint(80,320,"XVZBHYWQ");
-        GL.FontPrintf(80,400,"Count: %d",anim++);
-
-//        GL.FillRectangle(0,0,255,255,GL.GetPixelFontTexture());
+        GL.FontPrint(80,80,"The fixed built in font for comparison");
 
         GL.EndFrame();
 

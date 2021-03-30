@@ -26,7 +26,7 @@
 #include <cmath>
 #include <set>
 #include <vector>
-
+#include <map>
 #include <signal.h>
 #include <assert.h>
 
@@ -38,6 +38,15 @@
 	#include "bcm_host.h"
 #endif
 
+/**
+ * @brief The define USE_FREETYPEFONTS allows users of this lib to disable freetype support to reduce code size and dependencies.
+ * Make sure you have freetype dev installed. sudo apt install libfreetype6-dev
+ * Also add /usr/include/freetype2 to your build paths. The include macros need this.
+ */
+#ifdef USE_FREETYPEFONTS
+	#include <freetype2/ft2build.h>
+	#include FT_FREETYPE_H
+#endif
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -87,6 +96,58 @@ struct SystemEventData
 
 // Forward decleration of internal types.
 struct GLShader;
+
+#ifdef USE_FREETYPEFONTS
+/**
+ * @brief Optional freetype font library support. Is optional as the code is dependant on a library tha may not be avalibel for the host platform.
+ * One note, I don't do localisation. ASCII here. If you need all the characters then maybe add yourself or use a commercial grade GL engine. :) localisation is a BIG job!
+ * Rendering is done in the GL code, this class is more of just a container.
+ */
+struct FreeTypeFont
+{
+	struct Glyph
+	{
+		std::vector<uint8_t> rgba;
+		int bbox_ymax;
+		int y_off;
+		int glyph_width;
+		int advance;
+	};
+
+	FreeTypeFont(const std::string& pFontName,int pPixelHeight = 40,bool pVerbose = false);
+	~FreeTypeFont();
+
+	void SetColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){mColour.R = pRed;mColour.G = pGreen;mColour.B = pBlue;mColour.A = pAlpha;}
+
+	/**
+	 * @brief Get the Glyph object of an ASCII character. All that is needed to render as well as update the texture cache if needed.
+	 */
+	const FreeTypeFont::Glyph* GetGlyph(char pChar)const;
+
+private:
+	const bool mVerbose;
+	FT_Face mFace;			//<! The font we are rending from.
+	uint32_t mTexture;		//<! This is the texture cache that the glyphs are in so we can render using GL and quads.
+
+	struct
+	{
+		uint8_t R = 255;
+		uint8_t G = 255;
+		uint8_t B = 255;
+		uint8_t A = 255;
+	}mColour;	
+
+	// We build this as and when we need them. Although on load the most lightly ones are pre cached. (a-z, A-Z,0-9,and some symbols)
+	std::map<char,std::unique_ptr<Glyph>> mGlyphs;
+
+	/**
+	 * @brief This is for the free type font support.
+	 */
+	static FT_Library mFreetype;
+	static int mFreetypeRefCount;
+
+};
+#endif // #ifdef USE_FREETYPEFONTS
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // vertex buffer utility
@@ -327,6 +388,16 @@ public:
 	void FontPrintf(int pX,int pY,const char* pFmt,...);
 	void FontSetScale(int pScale){assert(pScale>0);mPixelFont.scale = pScale;}
 	void FontSetColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){mPixelFont.R = pRed;mPixelFont.G = pGreen;mPixelFont.B = pBlue;mPixelFont.A = pAlpha;}
+
+//*******************************************
+// Free type rendering
+#ifdef USE_FREETYPEFONTS
+
+	void FontPrint(FreeTypeFont& pFont,int pX,int pY,const char* pText);
+	void FontPrintf(FreeTypeFont& pFont,int pX,int pY,const char* pFmt,...);
+
+#endif
+//*******************************************
 
 private:
 

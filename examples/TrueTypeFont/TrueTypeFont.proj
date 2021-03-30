@@ -13,6 +13,7 @@
             "include":
             [
                 "/opt/vc/include/",
+                "/usr/include/freetype2",
                 "../.."
             ],
             "libs":
@@ -22,7 +23,8 @@
                 "m",
                 "brcmGLESv2",
                 "brcmEGL",
-                "bcm_host"
+                "bcm_host",
+                "freetype"
             ],
             "libpaths":
             [
@@ -30,7 +32,8 @@
             ],
             "define": [
                 "DEBUG_BUILD",
-                "PLATFORM_BROADCOM_GLES"
+                "PLATFORM_BROADCOM_GLES",
+                "USE_FREETYPEFONTS"
             ]
         },
         "GLES-debug":
@@ -40,6 +43,7 @@
             "standard": "c++17",
             "include":
             [
+                "/usr/include/freetype2",
                 "../.."
             ],
             "libs":
@@ -48,7 +52,8 @@
                 "pthread",
                 "m",
                 "GLESv2",
-                "EGL"
+                "EGL",
+                "freetype"
             ],
             "libpaths":
             [
@@ -56,7 +61,8 @@
             ],
             "define": [
                 "DEBUG_BUILD",
-                "PLATFORM_GLES"
+                "PLATFORM_GLES",
+                "USE_FREETYPEFONTS"
             ]
         }
     },
