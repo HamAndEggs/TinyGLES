@@ -1,0 +1,64 @@
+{
+    "source_files": [
+        "TextureUpdating.cpp",
+        "../../TinyGLES.cpp"
+    ],
+   "configurations":
+    {
+        "bcm_host-GLES-debug":
+        {
+            "default": true,
+            "enable_all_warnings": false,
+            "standard": "c++17",
+            "include":
+            [
+                "/opt/vc/include/",
+                "../.."
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "brcmGLESv2",
+                "brcmEGL",
+                "bcm_host"
+            ],
+            "libpaths":
+            [
+                "/opt/vc/lib"
+            ],
+            "define": [
+                "DEBUG_BUILD",
+                "PLATFORM_BROADCOM_GLES"
+            ]
+        },
+        "GLES-debug":
+        {
+            "default": false,
+            "enable_all_warnings": false,
+            "standard": "c++17",
+            "include":
+            [
+                "../.."
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "GLESv2",
+                "EGL"
+            ],
+            "libpaths":
+            [
+                "/opt/vc/lib"
+            ],
+            "define": [
+                "DEBUG_BUILD",
+                "PLATFORM_GLES"
+            ]
+        }
+    },
+    "version": "0.0.1"
+}

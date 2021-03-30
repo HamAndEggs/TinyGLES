@@ -300,6 +300,12 @@ public:
 	inline uint32_t CreateTextureRGBA(int pWidth,int pHeight,const uint8_t* pPixels,bool pFiltered = false,bool pGenerateMipmaps = false){return CreateTexture(pWidth,pHeight,pPixels,true,pFiltered,pGenerateMipmaps);}
 
 	/**
+	 * @brief Fill a sub rectangle, or the whole texture. Pixels is expected to be a continuous image data. So it's size is WidthxHeight of the region being updated.
+	 * Pixels must be in the format that the texture was originally created with.
+	 */
+	void FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha = false,bool pGenerateMips = false);
+
+	/**
 	 * @brief Delete the texture, will throw an exception is texture not found.
 	 * All textures are deleted when the GLES context is torn down so you only need to use this if you need to reclaim some memory.
 	 */

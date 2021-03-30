@@ -496,6 +496,28 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool 
 	return tex;
 }
 
+void GLES::FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha,bool pGenerateMips)
+{
+	glBindTexture(GL_TEXTURE_2D,pTexture);
+
+	GLint format = pHasAlpha?GL_RGBA:GL_RGB;
+
+	glTexSubImage2D(GL_TEXTURE_2D,
+		0,
+		pX,pY,
+		pWidth,pHeight,
+		format,GL_UNSIGNED_BYTE,
+		pPixels);
+
+	if( pGenerateMips )
+	{
+		glGenerateMipmap(GL_TEXTURE_2D);
+	}
+
+	glBindTexture(GL_TEXTURE_2D,0);//Because we had to change it to setup the texture! Stupid GL!
+}
+
+
 /**
  * @brief Delete the texture, will throw an exception is texture not found.
  * All textures are deleted when the GLES context is torn down so you only need to use this if you need to reclaim some memory.
