@@ -155,6 +155,14 @@ GLES::~GLES()
 
 	Clear(0,0,0);
 	eglSwapBuffers(mDisplay,mSurface);
+	glFlush();
+	glFinish();
+
+	// Kill shaders.
+	mShaders.ColourOnly.release();
+	mShaders.TextureColour.release();
+
+	eglSwapBuffers(mDisplay,mSurface);
     eglDestroyContext(mDisplay, mContext);
     eglDestroySurface(mDisplay, mSurface);
     eglTerminate(mDisplay);
