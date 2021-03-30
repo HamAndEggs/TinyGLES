@@ -21,6 +21,9 @@
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
+#include <string>
+#include <vector>
+#include <string_view>
 
 #include <math.h>
 #include <string.h>
@@ -56,7 +59,7 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 
 struct Quad3D
 {
-	Vec3D v[4];
+	Vec3Df v[4];
 
 	const float* Data()const{return &v[0].x;}
 };
@@ -140,7 +143,6 @@ GLES::GLES(bool pVerbose) :
 	BuildShaders();
 	BuildDebugTexture();
 	BuildPixelFontTexture();
-
 }
 
 GLES::~GLES()
@@ -270,9 +272,9 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	}
 
 	// Make sure we don't go too far.
-	if( pNumPoints > m2DWorkSpace.size() )
+	if( pNumPoints > mWorkBuffers.vec2Df.size() )
 	{
-		pNumPoints = m2DWorkSpace.size();
+		pNumPoints = mWorkBuffers.vec2Df.size();
 	}
 
 
@@ -283,8 +285,8 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	const float y = (float)pCenterY;
 	for( int n = 0 ; n < pNumPoints ; n++, rad += step )
 	{
-		m2DWorkSpace[n].x = x - (r*std::sin(rad));
-		m2DWorkSpace[n].y = y + (r*std::cos(rad));
+		mWorkBuffers.vec2Df[n].x = x - (r*std::sin(rad));
+		mWorkBuffers.vec2Df[n].y = y + (r*std::cos(rad));
 	}
 
 	assert(mShaders.ColourOnly);
@@ -292,7 +294,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	mShaders.ColourOnly->SetTransformIdentity();
 	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 
-	VertexPtr(2,GL_FLOAT,8,m2DWorkSpace.data());
+	VertexPtr(2,GL_FLOAT,8,mWorkBuffers.vec2Df.data());
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,pNumPoints);
 	CHECK_OGL_ERRORS();
 }
@@ -336,15 +338,15 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 	numPoints = (numPoints+3)&~3;
 
 	// Make sure we don't go too far.
-	if( numPoints > m2DWorkSpace.size() )
+	if( numPoints > mWorkBuffers.vec2Df.size() )
 	{
-		numPoints = m2DWorkSpace.size();
+		numPoints = mWorkBuffers.vec2Df.size();
 	}
 
 	float rad = GetRadian();
 	const float step = GetRadian() / (float)(numPoints-1);
 	const float r = (float)pRadius;
-	Vec2D* p = m2DWorkSpace.data();
+	Vec2Df* p = mWorkBuffers.vec2Df.data();
 
 	pToX -= pRadius;
 	pToY -= pRadius;
@@ -388,7 +390,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 	mShaders.ColourOnly->SetTransformIdentity();
 	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 
-	VertexPtr(2,GL_FLOAT,8,m2DWorkSpace.data());
+	VertexPtr(2,GL_FLOAT,8,mWorkBuffers.vec2Df.data());
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,numPoints);
 	CHECK_OGL_ERRORS();
 }
@@ -516,7 +518,48 @@ void GLES::DeleteTexture(uint32_t pTexture)
 // Pixel font, low res, mainly for debugging.
 void GLES::FontPrint(int pX,int pY,const char* pText)
 {
-	
+	const std::string_view s(pText);
+	mWorkBuffers.vec2Ds.Reset();
+
+	// Get where the uvs will be written too.
+	const Vec2Ds* verts = mWorkBuffers.vec2Ds.end();
+	const int quadSize = 16 * mPixelFont.scale;
+	const int squishHack = 3 * mPixelFont.scale;
+	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,s.size(),quadSize - squishHack,0);
+	// how many?
+	const int numVerts = mWorkBuffers.vec2Ds.size();
+
+	// Get where the uvs will be written too.
+	const int maxUV = 32767;
+	const int charSize = maxUV / 16;
+	const Vec2Ds* uvs = mWorkBuffers.vec2Ds.end();
+	for( auto c : s )
+	{
+		const int x = ((int)c&0x0f) * charSize;
+		const int y = ((int)c>>4) * charSize;
+		mWorkBuffers.vec2Ds.BuildQuad(x+64,y+64,charSize-128,charSize-128);// The +- 64 is because of filtering. Makes font look nice at normal size.
+	}
+
+	// Continue adding uvs to the buffer after the verts.
+
+	assert(mShaders.TextureColour);
+	mShaders.TextureColour->Enable(mMatrices.projection);
+	mShaders.TextureColour->SetTransformIdentity();
+	mShaders.TextureColour->SetGlobalColour(mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
+	mShaders.TextureColour->SetTexture(mPixelFont.texture);
+
+	glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
+
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::TEXCOORD,
+				2,
+				GL_SHORT,
+				GL_TRUE,
+				4,uvs);
+
+	VertexPtr(2,GL_SHORT,4,verts);
+	glDrawArrays(GL_TRIANGLES,0,numVerts);
+	CHECK_OGL_ERRORS();
 }
 
 void GLES::FontPrintf(int pX,int pY,const char* pFmt,...)
@@ -528,7 +571,6 @@ void GLES::FontPrintf(int pX,int pY,const char* pFmt,...)
 	va_end(args);
 	FontPrint(pX,pY, buf);
 }
-
 
 // End of Pixel font.
 //*******************************************
@@ -873,7 +915,7 @@ void GLES::BuildPixelFontTexture()
 		}
 	}
 
-	mPixelFont.texture = CreateTextureRGBA(256,256,RGBA.data());
+	mPixelFont.texture = CreateTextureRGBA(256,256,RGBA.data(),true);
 }
 
 

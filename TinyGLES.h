@@ -85,8 +85,52 @@ struct SystemEventData
 	SystemEventData(SystemEventType pType) : mType(pType){}
 };
 
-// Forward decleration of internal type.
+// Forward decleration of internal types.
 struct GLShader;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// vertex buffer utility
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+template<typename _VertexType> struct VertexBuffer
+{
+	inline void Reset()
+	{
+		mVerts.resize(0);// I'm taking it on faith that this does nothing but set an int to zero. 
+	}
+
+	/**
+	 * @brief Writes six vertices to the buffer.
+	 */
+	inline void BuildQuad(int pX,int pY,int pWidth,int pHeight)
+	{
+		mVerts.emplace_back(pX,pY);
+		mVerts.emplace_back(pX + pWidth,pY);
+		mVerts.emplace_back(pX + pWidth,pY + pHeight);
+
+		mVerts.emplace_back(pX,pY);
+		mVerts.emplace_back(pX + pWidth,pY + pHeight);
+		mVerts.emplace_back(pX,pY + pHeight);
+	}
+
+	/**
+	 * @brief Adds a number of quads to the buffer, moving STEP for each one.
+	 */
+	inline void BuildQuads(int pX,int pY,int pWidth,int pHeight,int pCount,int pXStep,int pYStep)
+	{
+		for(int n = 0 ; n < pCount ; n++, pX += pXStep, pY += pYStep )
+		{
+			BuildQuad(pX,pY,pWidth,pHeight);
+		}
+	}
+
+	const size_t size()const{return mVerts.size();}
+	const _VertexType* data()const{return mVerts.data();}
+	const _VertexType* end()const{return mVerts.data() + mVerts.size();}
+
+private:
+	std::vector<_VertexType> mVerts;
+};
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 constexpr float GetPI()
 {
@@ -103,12 +147,19 @@ constexpr float DegreeToRadian(float pDegree)
 	return pDegree * (GetPI()/180.0f);
 }
 
-struct Vec2D
+struct Vec2Df
 {
 	float x,y;
 };
 
-struct Vec3D
+struct Vec2Ds
+{
+	Vec2Ds() = default;
+	Vec2Ds(int16_t pX,int16_t pY):x(pX),y(pY){};
+	int16_t x,y;
+};
+
+struct Vec3Df
 {
 	float x,y,z;
 };
@@ -269,7 +320,7 @@ public:
 	void FontPrint(int pX,int pY,const char* pText);
 	void FontPrintf(int pX,int pY,const char* pFmt,...);
 	void FontSetScale(int pScale){assert(pScale>0);mPixelFont.scale = pScale;}
-	void FontSetColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue){mPixelFont.R = pRed;mPixelFont.G = pGreen;mPixelFont.B = pBlue;}
+	void FontSetColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){mPixelFont.R = pRed;mPixelFont.G = pGreen;mPixelFont.B = pBlue;mPixelFont.A = pAlpha;}
 
 private:
 
@@ -336,7 +387,11 @@ private:
 	EGLNativeWindowType mNativeWindow;
 #endif
 
-	std::array<Vec2D,128> m2DWorkSpace;
+	struct
+	{
+		std::array<Vec2Df,128> vec2Df;
+		VertexBuffer<Vec2Ds> vec2Ds;
+	}mWorkBuffers;
 
 	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.
 	bool mKeepGoing = true; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
@@ -352,7 +407,7 @@ private:
 	struct
 	{
 		uint32_t texture = 0; //!< The texture used for rendering the pixel font.
-		uint8_t R = 255,G = 255,B = 255;
+		uint8_t R = 255,G = 255,B = 255,A = 255;
 		int scale = 1;
 	}mPixelFont;
 

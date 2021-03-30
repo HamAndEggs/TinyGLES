@@ -24,7 +24,15 @@ int main(int argc, char *argv[])
         GL.FillRoundedRectangle(50,50,GL.GetWidth()-50,GL.GetHeight()-50,100,55,20,155);
         GL.DrawRoundedRectangle(50,50,GL.GetWidth()-50,GL.GetHeight()-50,100,255,255,255);
 
-        GL.FontPrint(80,80,"Hellow World");
+        GL.FontSetScale(1);
+        GL.FontPrint(80,80,"Hello World");
+        GL.FontPrint(80,120,"XVZBHYWQ");
+        GL.FontPrintf(80,160,"Count: %d",anim++);
+
+        GL.FontSetScale(5);
+        GL.FontPrint(80,200,"Hello World");
+        GL.FontPrint(80,320,"XVZBHYWQ");
+        GL.FontPrintf(80,400,"Count: %d",anim++);
 
 //        GL.FillRectangle(0,0,255,255,GL.GetPixelFontTexture());
 
