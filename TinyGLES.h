@@ -24,8 +24,11 @@
 #include <functional>
 #include <memory>
 #include <cmath>
-
+#include <set>
+#include <vector>
+#include <map>
 #include <signal.h>
+#include <assert.h>
 
 #include "GLES2/gl2.h" //sudo apt install libgles2-mesa-dev
 #include "EGL/egl.h"
@@ -35,6 +38,15 @@
 	#include "bcm_host.h"
 #endif
 
+/**
+ * @brief The define USE_FREETYPEFONTS allows users of this lib to disable freetype support to reduce code size and dependencies.
+ * Make sure you have freetype dev installed. sudo apt install libfreetype6-dev
+ * Also add /usr/include/freetype2 to your build paths. The include macros need this.
+ */
+#ifdef USE_FREETYPEFONTS
+	#include <freetype2/ft2build.h>
+	#include FT_FREETYPE_H
+#endif
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -56,6 +68,13 @@ enum SystemEventType
 	SYSTEM_EVENT_POINTER_UP
 };
 
+enum struct StreamIndex
+{
+	VERTEX				= 0,		//!< Vertex positional data.
+	TEXCOORD			= 1,		//!< Texture coordinate information.
+	COLOUR				= 2,		//!< Colour type is in the format RGBA.
+};
+
 /**
  * @brief The data relating to a system event.
  * I've implemented some very basic events. Not going to over do it. Just passes on some common ones.
@@ -75,8 +94,106 @@ struct SystemEventData
 	SystemEventData(SystemEventType pType) : mType(pType){}
 };
 
-// Forward decleration of internal type.
+// Forward decleration of internal types.
 struct GLShader;
+
+#ifdef USE_FREETYPEFONTS
+/**
+ * @brief Optional freetype font library support. Is optional as the code is dependant on a library tha may not be avalibel for the host platform.
+ * One note, I don't do localisation. ASCII here. If you need all the characters then maybe add yourself or use a commercial grade GL engine. :) localisation is a BIG job!
+ * Rendering is done in the GL code, this class is more of just a container.
+ */
+struct FreeTypeFont
+{
+	struct Glyph
+	{
+		std::vector<uint8_t> pixels;
+		int width;
+		int rows;
+		int pitch;
+		int advance;
+	};
+
+	FreeTypeFont(const std::string& pFontName,int pPixelHeight = 40,bool pVerbose = false);
+	~FreeTypeFont();
+
+	void SetColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){mColour.R = pRed;mColour.G = pGreen;mColour.B = pBlue;mColour.A = pAlpha;}
+
+	/**
+	 * @brief Get the Glyph object of an ASCII character. All that is needed to render as well as update the texture cache if needed.
+	 */
+	const FreeTypeFont::Glyph* GetGlyph(char pChar);
+
+private:
+	const std::string mFontName; //<! Helps with debugging.
+	const bool mVerbose;
+	FT_Face mFace;			//<! The font we are rending from.
+	uint32_t mTexture;		//<! This is the texture cache that the glyphs are in so we can render using GL and quads.
+
+	struct
+	{
+		uint8_t R = 255;
+		uint8_t G = 255;
+		uint8_t B = 255;
+		uint8_t A = 255;
+	}mColour;	
+
+	// We build this as and when we need them. Although on load the most lightly ones are pre cached. (a-z, A-Z,0-9,and some symbols)
+	std::map<char,std::unique_ptr<Glyph>> mGlyphs;
+
+	/**
+	 * @brief This is for the free type font support.
+	 */
+	static FT_Library mFreetype;
+	static int mFreetypeRefCount;
+	static Glyph mBlankGlyph;
+
+};
+#endif // #ifdef USE_FREETYPEFONTS
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// vertex buffer utility
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+template<typename _VertexType> struct VertexBuffer
+{
+	inline void Reset()
+	{
+		mVerts.resize(0);// I'm taking it on faith that this does nothing but set an int to zero. 
+	}
+
+	/**
+	 * @brief Writes six vertices to the buffer.
+	 */
+	inline void BuildQuad(int pX,int pY,int pWidth,int pHeight)
+	{
+		mVerts.emplace_back(pX,pY);
+		mVerts.emplace_back(pX + pWidth,pY);
+		mVerts.emplace_back(pX + pWidth,pY + pHeight);
+
+		mVerts.emplace_back(pX,pY);
+		mVerts.emplace_back(pX + pWidth,pY + pHeight);
+		mVerts.emplace_back(pX,pY + pHeight);
+	}
+
+	/**
+	 * @brief Adds a number of quads to the buffer, moving STEP for each one.
+	 */
+	inline void BuildQuads(int pX,int pY,int pWidth,int pHeight,int pCount,int pXStep,int pYStep)
+	{
+		for(int n = 0 ; n < pCount ; n++, pX += pXStep, pY += pYStep )
+		{
+			BuildQuad(pX,pY,pWidth,pHeight);
+		}
+	}
+
+	const size_t size()const{return mVerts.size();}
+	const _VertexType* data()const{return mVerts.data();}
+	const _VertexType* end()const{return mVerts.data() + mVerts.size();}
+
+private:
+	std::vector<_VertexType> mVerts;
+};
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 constexpr float GetPI()
 {
@@ -93,12 +210,19 @@ constexpr float DegreeToRadian(float pDegree)
 	return pDegree * (GetPI()/180.0f);
 }
 
-struct Vec2D
+struct Vec2Df
 {
 	float x,y;
 };
 
-struct Vec3D
+struct Vec2Ds
+{
+	Vec2Ds() = default;
+	Vec2Ds(int16_t pX,int16_t pY):x(pX),y(pY){};
+	int16_t x,y;
+};
+
+struct Vec3Df
 {
 	float x,y,z;
 };
@@ -216,9 +340,10 @@ public:
 	/**
 	 * @brief Draws a rectangle with the passed in RGB values either filled or not.
 	 */
-	void Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled);
-	inline void DrawRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,false);}
-	inline void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,true);}
+	void Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled,uint32_t pTexture);
+	inline void DrawRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,false,0);}
+	inline void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,uint32_t pTexture = 0){Rectangle(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue,pAlpha,true,pTexture);}
+	inline void FillRectangle(int pFromX,int pFromY,int pToX,int pToY,uint32_t pTexture = 0){Rectangle(pFromX,pFromY,pToX,pToY,255,255,255,255,true,pTexture);}
 
 	/**
 	 * @brief Draws a rectangle with rounder corners in the passed in RGB values either filled or not.
@@ -227,14 +352,56 @@ public:
 	inline void DrawRoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){RoundedRectangle(pFromX,pFromY,pToX,pToY,pRadius,pRed,pGreen,pBlue,pAlpha,false);}
 	inline void FillRoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){RoundedRectangle(pFromX,pFromY,pToX,pToY,pRadius,pRed,pGreen,pBlue,pAlpha,true);}
 
-private:
-	enum struct StreamIndex
-	{
-		VERTEX				= 0,		//!< Vertex positional data.
-		TEXCOORD			= 1,		//!< Texture coordinate information.
-		COLOUR				= 2,		//!< Colour type is in the format RGBA.
-	};
+//*******************************************
+// Texture commands.
+	/**
+	 * @brief Create a Texture object with the size passed in and a given name. 
+	 * pPixels is either RGB format 24bit or RGBA 32bit format is pHasAlpha is true.
+	 */
+	uint32_t CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha = false,bool pFiltered = false,bool pGenerateMipmaps = false);
+	inline uint32_t CreateTextureRGB(int pWidth,int pHeight,const uint8_t* pPixels,bool pFiltered = false,bool pGenerateMipmaps = false){return CreateTexture(pWidth,pHeight,pPixels,false,pFiltered,pGenerateMipmaps);}
+	inline uint32_t CreateTextureRGBA(int pWidth,int pHeight,const uint8_t* pPixels,bool pFiltered = false,bool pGenerateMipmaps = false){return CreateTexture(pWidth,pHeight,pPixels,true,pFiltered,pGenerateMipmaps);}
 
+	/**
+	 * @brief Fill a sub rectangle, or the whole texture. Pixels is expected to be a continuous image data. So it's size is WidthxHeight of the region being updated.
+	 * Pixels must be in the format that the texture was originally created with.
+	 */
+	void FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha = false,bool pGenerateMips = false);
+
+	/**
+	 * @brief Delete the texture, will throw an exception is texture not found.
+	 * All textures are deleted when the GLES context is torn down so you only need to use this if you need to reclaim some memory.
+	 */
+	void DeleteTexture(uint32_t pTexture);
+
+	/**
+	 * @brief Get the Debug Texture for use to help with finding issues.
+	 */
+	uint32_t GetDebugTexture()const{return mDebugTexture;}
+
+	/**
+	 * @brief Get the Pixel Font Texture object
+	 */
+	uint32_t GetPixelFontTexture()const{return mPixelFont.texture;}
+
+//*******************************************
+// Pixel font, low res, mainly for debugging.
+	void FontPrint(int pX,int pY,const char* pText);
+	void FontPrintf(int pX,int pY,const char* pFmt,...);
+	void FontSetScale(int pScale){assert(pScale>0);mPixelFont.scale = pScale;}
+	void FontSetColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){mPixelFont.R = pRed;mPixelFont.G = pGreen;mPixelFont.B = pBlue;mPixelFont.A = pAlpha;}
+
+//*******************************************
+// Free type rendering
+#ifdef USE_FREETYPEFONTS
+
+	void FontPrint(FreeTypeFont& pFont,int pX,int pY,const char* pText);
+	void FontPrintf(FreeTypeFont& pFont,int pX,int pY,const char* pFmt,...);
+
+#endif
+//*******************************************
+
+private:
 
 	/**
 	 * @brief Check for system events that the application my want.
@@ -273,6 +440,9 @@ private:
 	 */
 	void BuildShaders();
 
+	void BuildDebugTexture();
+	void BuildPixelFontTexture();
+
 	void VertexPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer);
 	void TexCoordPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer);
 	void ColourPtr(GLint pNum_coord, GLsizei pStride,const uint8_t* pPointer);
@@ -296,10 +466,29 @@ private:
 	EGLNativeWindowType mNativeWindow;
 #endif
 
-	std::array<Vec2D,128> m2DWorkSpace;
+	struct
+	{
+		std::array<Vec2Df,128> vec2Df;
+		VertexBuffer<Vec2Ds> vec2Ds;
+	}mWorkBuffers;
 
 	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.
 	bool mKeepGoing = true; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
+
+	/**
+	 * @brief A handy texture used in debugging. 16x16 check board.
+	 */
+	uint32_t mDebugTexture = 0;
+
+	std::set<uint32_t> mTextures; //!< Our textures
+
+	static const std::vector<uint32_t> mFont16x16Data;	//!< used to rebuild font texture.
+	struct
+	{
+		uint32_t texture = 0; //!< The texture used for rendering the pixel font.
+		uint8_t R = 255,G = 255,B = 255,A = 255;
+		int scale = 1;
+	}mPixelFont;
 
 	/**
 	 * @brief Information about the mouse driver
@@ -321,6 +510,7 @@ private:
 	struct
 	{
 		std::unique_ptr<GLShader> ColourOnly;
+		std::unique_ptr<GLShader> TextureColour;
 	}mShaders;
 
 	struct

@@ -1,9 +1,9 @@
 {
     "source_files": [
-        "2D.cpp",
+        "PixelFont.cpp",
         "../../TinyGLES.cpp"
     ],
-    "configurations":
+   "configurations":
     {
         "bcm_host-GLES-debug":
         {
