@@ -15,7 +15,7 @@ int main(int argc, char *argv[])
 
     tinygles::GLES GL(true);
 
-    tinygles::FreeTypeFont FTFont("./Blenda Script.otf",40,true);
+    const uint32_t FTFont = GL.FontLoad("./Blenda Script.otf",40,true);
 
     int anim = 0;
     while( GL.BeginFrame() )

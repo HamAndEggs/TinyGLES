@@ -1,7 +1,7 @@
 {
     "source_files": [
-        "TrueTypeFont.cpp",
-        "../../TinyGLES.cpp"
+        "../../TinyGLES.cpp",
+        "TrueTypeFont.cpp"
     ],
    "configurations":
     {
@@ -54,10 +54,6 @@
                 "GLESv2",
                 "EGL",
                 "freetype"
-            ],
-            "libpaths":
-            [
-                "/opt/vc/lib"
             ],
             "define": [
                 "DEBUG_BUILD",
