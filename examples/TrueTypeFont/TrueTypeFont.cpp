@@ -28,6 +28,8 @@ int main(int argc, char *argv[])
 
         GL.FontPrint(80,80,"The fixed built in font for comparison");
 
+        GL.FontPrintf(FTFont,80,200,"Anim: %d",anim);
+
         GL.EndFrame();
 
     }

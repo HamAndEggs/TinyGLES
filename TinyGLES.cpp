@@ -610,7 +610,48 @@ void GLES::FontPrintf(int pX,int pY,const char* pFmt,...)
 #ifdef USE_FREETYPEFONTS
 void GLES::FontPrint(FreeTypeFont& pFont,int pX,int pY,const char* pText)
 {
+	const std::string_view s(pText);
+	mWorkBuffers.vec2Ds.Reset();
 
+	// Get where the uvs will be written too.
+	const Vec2Ds* verts = mWorkBuffers.vec2Ds.end();
+	const int quadSize = 16 * mPixelFont.scale;
+	const int squishHack = 3 * mPixelFont.scale;
+	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,s.size(),quadSize - squishHack,0);
+	// how many?
+	const int numVerts = mWorkBuffers.vec2Ds.size();
+
+	// Get where the uvs will be written too.
+	const int maxUV = 32767;
+	const int charSize = maxUV / 16;
+	const Vec2Ds* uvs = mWorkBuffers.vec2Ds.end();
+	for( auto c : s )
+	{
+		const int x = ((int)c&0x0f) * charSize;
+		const int y = ((int)c>>4) * charSize;
+		mWorkBuffers.vec2Ds.BuildQuad(x+64,y+64,charSize-128,charSize-128);// The +- 64 is because of filtering. Makes font look nice at normal size.
+	}
+
+	// Continue adding uvs to the buffer after the verts.
+
+	assert(mShaders.TextureColour);
+	mShaders.TextureColour->Enable(mMatrices.projection);
+	mShaders.TextureColour->SetTransformIdentity();
+	mShaders.TextureColour->SetGlobalColour(mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
+	mShaders.TextureColour->SetTexture(mPixelFont.texture);
+
+	glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
+
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::TEXCOORD,
+				2,
+				GL_SHORT,
+				GL_TRUE,
+				4,uvs);
+
+	VertexPtr(2,GL_SHORT,4,verts);
+	glDrawArrays(GL_TRIANGLES,0,numVerts);
+	CHECK_OGL_ERRORS();
 }
 
 void GLES::FontPrintf(FreeTypeFont& pFont,int pX,int pY,const char* pFmt,...)
@@ -1287,8 +1328,11 @@ void ReadOGLErrors(const char *pSource_file_name,int pLine_number)
  */
 FT_Library FreeTypeFont::mFreetype = nullptr;
 int FreeTypeFont::mFreetypeRefCount = 0;
+FreeTypeFont::Glyph FreeTypeFont::mBlankGlyph = {{},0,0,0,0};
+
 
 FreeTypeFont::FreeTypeFont(const std::string& pFontName,int pPixelHeight,bool pVerbose) :
+	mFontName(pFontName),
 	mVerbose(pVerbose)
 {
 	if( mFreetype == nullptr )
@@ -1307,20 +1351,43 @@ FreeTypeFont::FreeTypeFont(const std::string& pFontName,int pPixelHeight,bool pV
 	mFreetypeRefCount++;
 	VERBOSE_MESSAGE("mFreetypeRefCount = " << mFreetypeRefCount);
 
-	if( FT_New_Face(mFreetype,pFontName.c_str(),0,&mFace) == 0 )
+	if( FT_New_Face(mFreetype,mFontName.c_str(),0,&mFace) == 0 )
 	{
 		if( FT_Set_Pixel_Sizes(mFace,0,pPixelHeight) == 0 )
 		{
-			VERBOSE_MESSAGE("Free type font loaded: " << pFontName);
+			VERBOSE_MESSAGE("Free type font loaded: " << mFontName);
 		}
 		else
 		{
-			VERBOSE_MESSAGE("Failed to set pixel size " << pPixelHeight << " for true type font " << pFontName);
+			VERBOSE_MESSAGE("Failed to set pixel size " << pPixelHeight << " for true type font " << mFontName);
 		}
 	}
 	else if( mVerbose )
 	{
-		throw std::runtime_error("Failed to load true type font " + pFontName);
+		throw std::runtime_error("Failed to load true type font " + mFontName);
+	}
+
+	// Prefetch some glyphs I thing we'll need.
+	VERBOSE_MESSAGE("Prefetching glyphs");
+	const std::array<char,18> commonChars = {' ','#',':','\'','\"','$','&','*','\\','+','-','.','(',')','{','}','[',']'};
+	for(auto c : commonChars )
+	{
+		GetGlyph(c);
+	}
+
+	for( char c = 'A' ; c <= 'Z' ; c++ )
+	{
+		GetGlyph(c);
+	}
+
+	for( char c = 'a' ; c <= 'z' ; c++ )
+	{
+		GetGlyph(c);
+	}
+
+	for( char c = '0' ; c <= '9' ; c++ )
+	{
+		GetGlyph(c);
 	}
 }
 
@@ -1331,23 +1398,23 @@ FreeTypeFont::~FreeTypeFont()
 	mFreetypeRefCount--;
 	if( mFreetypeRefCount <= 0 && mFreetype != NULL )
 	{
-		if( FT_Done_FreeType(mFreetype) == 0 )
+		if( FT_Done_FreeType(mFreetype) == FT_Err_Ok )
 		{
 			mFreetype = NULL;
-			if(mVerbose)
-			{
-				std::cout << "Freetype font library deleted\n";
-			}	
+			VERBOSE_MESSAGE("Freetype font library deleted");
 		}
 		else
 		{
-			std::cerr << "Failed to delete free type font library.\n";
+			//throw std::runtime_error("Failed to delete free type font library");
+			VERBOSE_MESSAGE("Failed to delete free type font library");
 		}
 	}	
 }
 
-const FreeTypeFont::Glyph* FreeTypeFont::GetGlyph(char pChar)const
+const FreeTypeFont::Glyph* FreeTypeFont::GetGlyph(char pChar)
 {
+	assert(mFace);
+
 	// See if we already have it.
 	auto g = mGlyphs.find(pChar);
 	if( g != mGlyphs.end() )
@@ -1355,7 +1422,112 @@ const FreeTypeFont::Glyph* FreeTypeFont::GetGlyph(char pChar)const
 		return g->second.get();
 	}
 
-	return nullptr;
+	// Copied from original example source by Kevin Boone. http://kevinboone.me/fbtextdemo.html?i=1
+
+	// Note that TT fonts have no built-in padding. 
+	// That is, first,
+	//  the top row of the bitmap is the top row of pixels to 
+	//  draw. These rows usually won't be at the face bounding box. We need to
+	//  work out the overall height of the character cell, and
+	//  offset the drawing vertically by that amount. 
+	//
+	// Similar, there is no left padding. The first pixel in each row will not
+	//  be drawn at the left margin of the bounding box, but in the centre of
+	//  the screen width that will be occupied by the glyph.
+	//
+	//  We need to calculate the x and y offsets of the glyph, but we can't do
+	//  this until we've loaded the glyph, because metrics
+	//  won't be available.
+
+	// Note that, by default, TT metrics are in 64'ths of a pixel, hence
+	//  all the divide-by-64 operations below.
+
+	// Get a FreeType glyph index for the character. If there is no
+	//  glyph in the face for the character, this function returns
+	//  zero.  
+	FT_UInt gi = FT_Get_Char_Index (mFace, pChar);
+	if( gi == 0 )
+	{// Character not found, so default to space.
+		VERBOSE_MESSAGE("Font: "<< mFontName << " Failed find glyph for character [" << pChar << "] " << (int)pChar);
+		return &mBlankGlyph;
+	}
+
+	// Loading the glyph makes metrics data available
+	if( FT_Load_Glyph (mFace, gi, FT_LOAD_DEFAULT ) != 0 )
+	{
+		VERBOSE_MESSAGE("Font: "<< mFontName << " Failed to load glyph for character [" << pChar << "] " << (int)pChar);
+		return &mBlankGlyph;
+	}
+
+	// Rendering a loaded glyph creates the bitmap
+	if( FT_Render_Glyph(mFace->glyph, FT_RENDER_MODE_NORMAL) != 0 )
+	{
+		VERBOSE_MESSAGE("Font: "<< mFontName << " Failed to render glyph for character [" << pChar << "] " << (int)pChar);
+		return &mBlankGlyph;
+	}
+
+	assert(mFace->glyph);
+
+	// Now we have the metrics, let's work out the x and y offset
+	//  of the glyph from the specified x and y. Because there is
+	//  no padding, we can't just draw the bitmap so that it's
+	//  TL corner is at (x,y) -- we must insert the "missing" 
+	//  padding by aligning the bitmap in the space available.
+
+	// bbox.yMax is the height of a bounding box that will enclose
+	//  any glyph in the face, starting from the glyph baseline.
+// Code changed, was casing it to render in the Y center of the font not on the base line. Will add it as an option in the future. Richard.
+	int bbox_ymax = 0;//mFace->bbox.yMax / 64;
+
+	// horiBearingX is the height of the top of the glyph from
+	//   the baseline. So we work out the y offset -- the distance
+	//   we must push down the glyph from the top of the bounding
+	//   box -- from the height and the Y bearing.
+	int y_off = bbox_ymax - mFace->glyph->metrics.horiBearingY / 64;
+
+	// glyph_width is the pixel width of this specific glyph
+	int glyph_width = mFace->glyph->metrics.width / 64;
+
+
+	// So now we have (x_off,y_off), the location at which to
+	//   start drawing the glyph bitmap.
+
+	// Build the new glyph.
+	mGlyphs[pChar] = std::make_unique<Glyph>();
+	Glyph* newGlyph = mGlyphs[pChar].get();
+	newGlyph->width = mFace->glyph->bitmap.width;
+	newGlyph->rows = mFace->glyph->bitmap.rows;
+	newGlyph->pitch = mFace->glyph->bitmap.pitch;
+
+	// Advance is the amount of x spacing, in pixels, allocated
+	//   to this glyph
+	newGlyph->advance = mFace->glyph->metrics.horiAdvance / 64;
+
+	const size_t expectedSize = mFace->glyph->bitmap.rows * mFace->glyph->bitmap.pitch;
+	// Some have no pixels, and so we just stop here.
+	if(expectedSize == 0);
+	{
+		return newGlyph;
+	}
+
+	assert(mFace->glyph->bitmap.buffer);
+
+	newGlyph->pixels.reserve(expectedSize);
+	const uint8_t* src = mFace->glyph->bitmap.buffer;
+	for (int i = 0; i < (int)mFace->glyph->bitmap.rows; i++ , src += mFace->glyph->bitmap.pitch )
+	{
+		for (int j = 0; j < (int)mFace->glyph->bitmap.width; j++ )
+		{
+			newGlyph->pixels.push_back(src[j]);
+		}
+	}
+
+	if( expectedSize != newGlyph->pixels.size() )
+	{
+		throw std::runtime_error("Font: " + mFontName + " Error, we read more pixels for free type font than expected for the glyph " + pChar );
+	}
+
+	return newGlyph;
 }
 #endif //#ifdef USE_FREETYPEFONTS
 

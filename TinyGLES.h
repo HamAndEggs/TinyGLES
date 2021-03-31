@@ -107,10 +107,10 @@ struct FreeTypeFont
 {
 	struct Glyph
 	{
-		std::vector<uint8_t> rgba;
-		int bbox_ymax;
-		int y_off;
-		int glyph_width;
+		std::vector<uint8_t> pixels;
+		int width;
+		int rows;
+		int pitch;
 		int advance;
 	};
 
@@ -122,9 +122,10 @@ struct FreeTypeFont
 	/**
 	 * @brief Get the Glyph object of an ASCII character. All that is needed to render as well as update the texture cache if needed.
 	 */
-	const FreeTypeFont::Glyph* GetGlyph(char pChar)const;
+	const FreeTypeFont::Glyph* GetGlyph(char pChar);
 
 private:
+	const std::string mFontName; //<! Helps with debugging.
 	const bool mVerbose;
 	FT_Face mFace;			//<! The font we are rending from.
 	uint32_t mTexture;		//<! This is the texture cache that the glyphs are in so we can render using GL and quads.
@@ -145,6 +146,7 @@ private:
 	 */
 	static FT_Library mFreetype;
 	static int mFreetypeRefCount;
+	static Glyph mBlankGlyph;
 
 };
 #endif // #ifdef USE_FREETYPEFONTS
