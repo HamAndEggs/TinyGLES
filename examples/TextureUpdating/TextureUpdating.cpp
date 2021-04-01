@@ -4,11 +4,11 @@
 
 static uint32_t MakeStartingTexture(tinygles::GLES& GL)
 {
-	uint8_t pixels[16*16*4];
+	uint8_t pixels[16*32*4];
 	uint8_t* dst = pixels;
 	for( int y = 0 ; y < 16 ; y++ )
 	{
-		for( int x = 0 ; x < 16 ; x++ )
+		for( int x = 0 ; x < 32 ; x++ )
 		{
 			if( (x&1) == (y&1) )
 			{
@@ -22,7 +22,7 @@ static uint32_t MakeStartingTexture(tinygles::GLES& GL)
 		}
 	}
 	
-    return GL.CreateTextureRGBA(16,16,pixels);
+    return GL.CreateTextureRGBA(32,16,pixels);
 }
 
 struct ABall
@@ -32,7 +32,7 @@ struct ABall
     int vx = 1 + (rand()%10);
     int vy = 1 + (rand()%10);
     const int size = 150;
-
+// I only fill the left half of the texture so you can see it changing and some not.
     void Update(tinygles::GLES &GL,uint32_t ballTexture)
     {
         ballx += vx;
@@ -55,7 +55,7 @@ struct ABall
             vy = (1+(rand()%7));
         }
 
-        GL.FillRectangle(ballx,bally,ballx+size,bally+size,ballTexture);
+        GL.FillRectangle(ballx,bally,ballx+size,bally+size/2,ballTexture);
     }
 };
 

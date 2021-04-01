@@ -428,6 +428,7 @@ private:
 	{
 		std::array<Vec2Df,128> vec2Df;
 		VertexBuffer<Vec2Ds> vec2Ds;
+		std::vector<uint8_t> zeroPixels; // Used to initialise a texture when user does not yet have all the pixels data. Please read comment in CreateTexture.
 	}mWorkBuffers;
 
 	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.

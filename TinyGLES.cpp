@@ -80,9 +80,8 @@ struct FreeTypeFont
 {
 	struct Glyph
 	{
-		std::vector<uint8_t> pixels;
 		int width;
-		int rows;
+		int height;
 		int pitch;
 		int advance;
 	};
@@ -93,7 +92,7 @@ struct FreeTypeFont
 	/**
 	 * @brief Get the Glyph object of an ASCII character. All that is needed to render as well as build the texture.
 	 */
-	bool GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph);
+	bool GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<uint8_t>& rPixels);
 
 	/**
 	 * @brief Builds our texture object.
@@ -104,8 +103,9 @@ struct FreeTypeFont
 
 	const std::string mFontName; //<! Helps with debugging.
 	const bool mVerbose;
-	FT_Face mFace;			//<! The font we are rending from.
-	uint32_t mTexture;		//<! This is the texture cache that the glyphs are in so we can render using GL and quads.
+	FT_Face mFace;								//<! The font we are rending from.
+	uint32_t mTexture;							//<! This is the texture that the glyphs are in so we can render using GL and quads. It's crud but works. ;)
+	std::array<FreeTypeFont::Glyph,96>mGlyphs;	//<! Meta data needed to render the characters.
 
 	struct
 	{
@@ -474,6 +474,18 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha,bool pFiltered,bool pGenerateMipmaps)
 {
 	// pPixels can be null if you're going to fill it later.
+	// But there is a gotcha, if you don't write to all the pixels the texture will not work.
+	// So what I do, to make the code usable, is if you pass NULL I will use a buffer to fill the
+	// the pixels with zero. Not ideal, but that's GL! Better than loosing days because your texture is black...
+	if( pPixels == nullptr )
+	{
+		const size_t size = pWidth*pHeight*4;
+		if( size > mWorkBuffers.zeroPixels.size() )
+		{
+			mWorkBuffers.zeroPixels.resize(size);
+		}
+		pPixels = mWorkBuffers.zeroPixels.data();
+	}
 
 	GLint format = pHasAlpha?GL_RGBA:GL_RGB;
 	GLint gl_format = GL_UNSIGNED_BYTE;
@@ -549,7 +561,7 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool 
 	glBindTexture(GL_TEXTURE_2D,0);//Because we had to change it to setup the texture! Stupid GL!
 	CHECK_OGL_ERRORS();
 
-	VERBOSE_MESSAGE("Texture " << tex << " created Mipmaps " << (pGenerateMipmaps?"true":"false") << " Filtered " << (pFiltered?"true":"false"));
+	VERBOSE_MESSAGE("Texture " << tex << " created, " << pWidth << "x" << pHeight << " Alpha = " << (pHasAlpha?"true":"false") << " Mipmaps = " << (pGenerateMipmaps?"true":"false") << " Filtered = " << (pFiltered?"true":"false"));
 
 
 	return tex;
@@ -679,11 +691,11 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 	mFreeTypeFonts[fontID] = std::make_unique<FreeTypeFont>(loadedFace,pPixelHeight,pVerbose);
 
 	// Now we need to prepare the texture cache.
-	auto& font = mFreeTypeFonts[fontID];
+	auto& font = mFreeTypeFonts.at(fontID);
 	font->BuildTexture(
 		[this](int pWidth,int pHeight)
 		{
-			return CreateTexture(pWidth,pHeight,NULL,true);
+			return CreateTexture(pWidth,pHeight,nullptr,true);
 		},
 		[this](uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels)
 		{
@@ -691,7 +703,7 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 		}
 	);
 
-	VERBOSE_MESSAGE("Free type font loaded: " << pFontName << " with internal ID of " << fontID);
+	VERBOSE_MESSAGE("Free type font loaded: " << pFontName << " with internal ID of " << fontID << " Using texture " << font->mTexture);
 
 	return fontID;
 }
@@ -703,7 +715,7 @@ void GLES::DeleteFont(uint32_t pFont)
 
 void GLES::SetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
 {
-	auto& font = mFreeTypeFonts[pFont];
+	auto& font = mFreeTypeFonts.at(pFont);
 	font->mColour.R = pRed;
 	font->mColour.G = pGreen;
 	font->mColour.B = pBlue;
@@ -712,9 +724,9 @@ void GLES::SetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,ui
 
 void GLES::FontPrint(uint32_t pFont,int pX,int pY,const char* pText)
 {
-	auto& font = mFreeTypeFonts[pFont];
-	FillRectangle(10,10,510,510,font->mTexture);
-/*
+	auto& font = mFreeTypeFonts.at(pFont);
+//	FillRectangle(10,10,510,510,font->mTexture);
+
 	const std::string_view s(pText);
 	mWorkBuffers.vec2Ds.Reset();
 
@@ -756,7 +768,7 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const char* pText)
 
 	VertexPtr(2,GL_SHORT,4,verts);
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
-	CHECK_OGL_ERRORS();*/
+	CHECK_OGL_ERRORS();
 }
 
 void GLES::FontPrintf(uint32_t pFont,int pX,int pY,const char* pFmt,...)
@@ -1464,7 +1476,7 @@ FreeTypeFont::~FreeTypeFont()
 	FT_Done_Face(mFace);	
 }
 
-bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph)
+bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<uint8_t>& rPixels)
 {
 	assert(mFace);
 
@@ -1522,7 +1534,7 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph)
 
 	// bbox.yMax is the height of a bounding box that will enclose
 	//  any glyph in the face, starting from the glyph baseline.
-// Code changed, was casing it to render in the Y center of the font not on the base line. Will add it as an option in the future. Richard.
+	// Code changed, was casing it to render in the Y center of the font not on the base line. Will add it as an option in the future. Richard.
 	int bbox_ymax = 0;//mFace->bbox.yMax / 64;
 
 	// horiBearingX is the height of the top of the glyph from
@@ -1540,13 +1552,14 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph)
 
 	// Build the new glyph.
 	rGlyph.width = mFace->glyph->bitmap.width;
-	rGlyph.rows = mFace->glyph->bitmap.rows;
+	rGlyph.height = mFace->glyph->bitmap.rows;
 	rGlyph.pitch = mFace->glyph->bitmap.pitch;
 
 	// Advance is the amount of x spacing, in pixels, allocated
 	//   to this glyph
 	rGlyph.advance = mFace->glyph->metrics.horiAdvance / 64;
 
+// I should add support for alpha only textures...
 	const size_t expectedSize = mFace->glyph->bitmap.rows * mFace->glyph->bitmap.pitch * 4;
 	// Some have no pixels, and so we just stop here.
 	if(expectedSize == 0)
@@ -1557,20 +1570,20 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph)
 
 	assert(mFace->glyph->bitmap.buffer);
 
-	rGlyph.pixels.reserve(expectedSize);
+	rPixels.reserve(expectedSize);
 	const uint8_t* src = mFace->glyph->bitmap.buffer;
 	for (int i = 0; i < (int)mFace->glyph->bitmap.rows; i++ , src += mFace->glyph->bitmap.pitch )
 	{
 		for (int j = 0; j < (int)mFace->glyph->bitmap.width; j++ )
 		{
-			rGlyph.pixels.push_back(255);
-			rGlyph.pixels.push_back(src[j]);
-			rGlyph.pixels.push_back(255);
-			rGlyph.pixels.push_back(255);
+			rPixels.push_back(255);
+			rPixels.push_back(255);
+			rPixels.push_back(255);
+			rPixels.push_back(src[j]);
 		}
 	}
 
-	if( expectedSize != rGlyph.pixels.size() )
+	if( expectedSize != rPixels.size() )
 	{
 		throw std::runtime_error("Font: " + mFontName + " Error, we read more pixels for free type font than expected for the glyph " + pChar );
 	}
@@ -1585,16 +1598,18 @@ void FreeTypeFont::BuildTexture(
 
 	int maxX = 0,maxY = 0;
 	int numTextureSlotsNeeded = 0;
-	std::array<FreeTypeFont::Glyph,96>glyphs;
+
+	std::array<std::vector<uint8_t>,96>glyphsPixels;
 	for( int c = 0 ; c < 96 ; c++ )// Cheap and quick font ASCII renderer. I'm not geeting into unicode. It's a nightmare to make fast in GL on a resource constrained system!
 	{
-		auto& g = glyphs.at(c);
-		if( GetGlyph((char)(c+32),g) )
+		auto& g = mGlyphs.at(c);
+		auto& p = glyphsPixels.at(c);
+		if( GetGlyph((char)(c+32),g,p) )
 		{
-			if( g.pixels.size() > 0 )
+			if( p.size() > 0 )
 			{
 				maxX = std::max(maxX,g.width);
-				maxY = std::max(maxY,g.rows);
+				maxY = std::max(maxY,g.height);
 				numTextureSlotsNeeded++;
 			}
 			else
@@ -1635,26 +1650,25 @@ void FreeTypeFont::BuildTexture(
 	memset(hack,255,sizeof(hack));
 	for( int y = 0 ; y < 8 ; y++ )
 	{
-		for( int x = 0 ; x < 12 ; x++ )
+		for( int x = 0 ; x < 12 ; x++, n++ )
 		{
-			auto& g = glyphs.at(n++);
+			auto& g = mGlyphs.at(n);
+			auto& p = glyphsPixels.at(n);
 			const int cx = (x * cellWidth) + (cellWidth/2) - (g.width / 2);
-			const int cy = (y * cellheight) + (cellheight/2) - (g.rows / 2);
-			if( g.pixels.size() > 0 )
+			const int cy = (y * cellheight) + (cellheight/2) - (g.height / 2);
+			if( p.size() > 0 )
 			{
-				VERBOSE_MESSAGE("Filling: " << (char)n << " " << n << " at " << cx << " cy " << cy << " w " << g.width << " h " << g.rows);
 				pFillTexture(
 					mTexture,
 					cx,
 					cy,
 					g.width,
-					g.rows,
-					hack//g.pixels.data()
+					g.height,
+					p.data()
 					);
 			}
 		}
-	}
-	
+	}	
 }
 
 #endif //#ifdef USE_FREETYPEFONTS
