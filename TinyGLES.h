@@ -88,6 +88,7 @@ enum struct StreamIndex
 	COLOUR				= 2,		//!< Colour type is in the format RGBA.
 };
 
+
 /**
  * @brief The data relating to a system event.
  * I've implemented some very basic events. Not going to over do it. Just passes on some common ones.
@@ -108,7 +109,7 @@ struct SystemEventData
 };
 
 // Forward decleration of internal types.
-struct GLShader;
+typedef std::shared_ptr<struct GLShader> TinyShader;
 
 #ifdef USE_FREETYPEFONTS
 	struct FreeTypeFont;
@@ -348,9 +349,9 @@ public:
 	void DeleteTexture(uint32_t pTexture);
 
 	/**
-	 * @brief Get the Debug Texture for use to help with finding issues.
+	 * @brief Get the diagnostics texture for use to help with finding issues.
 	 */
-	uint32_t GetDebugTexture()const{return mDebugTexture;}
+	uint32_t GetDiagnosticsTexture()const{return mDiagnostics.texture;}
 
 	/**
 	 * @brief Get the Pixel Font Texture object
@@ -418,6 +419,17 @@ private:
 	 */
 	void BuildShaders();
 
+	/**
+	 * @brief Based on the input data it will select and enable the correct shader to use. If the shader is already enabled then will just updated it's variables.
+	 * 
+	 */
+	void SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha);
+
+	/**
+	 * @brief If the shader is already active, only it's vars are updated. Else it it is enabled. Depending on platform you want to minimise the chaning of the shader used.
+	 */
+	void EnableShader(TinyShader pShader,uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha);
+
 	void BuildDebugTexture();
 	void BuildPixelFontTexture();
 	void InitFreeTypeFont();
@@ -456,9 +468,14 @@ private:
 	bool mKeepGoing = true; //!< Set to false by the application requesting to exit or the user doing ctrl + c.
 
 	/**
-	 * @brief A handy texture used in debugging. 16x16 check board.
+	 * @brief Some data used for diagnostics/
 	 */
-	uint32_t mDebugTexture = 0;
+	struct
+	{
+		uint32_t texture = 0; //!< A handy texture used in debugging. 16x16 check board.
+		uint32_t frameNumber = 0; //!< What frame we're on. incremented in BeginFrame() So first frame will be 1
+	}mDiagnostics;
+	
 
 	/**
 	 * @brief This is a pain in the arse, because we can't query the values used to create a gl texture we have to store them. horrid API GLES 2.0
@@ -499,9 +516,11 @@ private:
 
 	struct
 	{
-		std::unique_ptr<GLShader> ColourOnly;
-		std::unique_ptr<GLShader> TextureColour;
-		std::unique_ptr<GLShader> TextureAlphaOnly;
+		TinyShader ColourOnly;
+		TinyShader TextureColour;
+		TinyShader TextureAlphaOnly;
+
+		TinyShader CurrentShader;
 	}mShaders;
 
 	struct

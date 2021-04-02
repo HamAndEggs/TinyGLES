@@ -175,8 +175,8 @@ struct GLShader
 	void SetGlobalColour(float red,float green,float blue,float alpha);
 	void SetTexture(GLint texture);
 
+	bool GetUsesTexture()const{return mUniforms.tex0 > -1;}
 
-private:
 	const std::string mName;	//!< Mainly to help debugging.
 	const bool mVerbose;
 	GLint mShader;
@@ -189,7 +189,6 @@ private:
 	}mUniforms;
 
 	int LoadShader(int type, const char* shaderCode);
-
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -261,9 +260,10 @@ GLES::~GLES()
 	glFinish();
 
 	// Kill shaders.
-	mShaders.ColourOnly.release();
-	mShaders.TextureColour.release();
-	mShaders.TextureAlphaOnly.release();
+	mShaders.CurrentShader.reset();
+	mShaders.ColourOnly.reset();
+	mShaders.TextureColour.reset();
+	mShaders.TextureAlphaOnly.reset();
 
 	eglSwapBuffers(mDisplay,mSurface);
     eglDestroyContext(mDisplay, mContext);
@@ -273,13 +273,14 @@ GLES::~GLES()
 
 bool GLES::BeginFrame()
 {
+	mDiagnostics.frameNumber++;
 	return GLES::mKeepGoing;
 }
 
 void GLES::EndFrame()
 {
 	eglSwapBuffers(mDisplay,mSurface);
-
+	glFlush();// This makes sure the display is fully up to date before we allow them to interact with any kind of UI. This is the specified use of this function.
 	ProcessSystemEvents();
 }
 
@@ -343,7 +344,6 @@ void GLES::SetFrustum3D(float pFov, float pAspect, float pNear, float pFar)
 	mMatrices.projection.m[3][3] = 0.0f;
 }
 
-
 void GLES::OnApplicationExitRequest()
 {
 	VERBOSE_MESSAGE("Exit request from user, quitting application");
@@ -354,10 +354,6 @@ void GLES::OnApplicationExitRequest()
 		mSystemEventHandler(data);
 	}
 }
-	float RandF()
-	{
-		return ((float)rand()) / (float)RAND_MAX;
-	}
 
 //*******************************************
 // Primitive draw commands.
@@ -365,10 +361,7 @@ void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGr
 {
 	const int16_t quad[4] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY};
 
-	assert(mShaders.ColourOnly);
-	mShaders.ColourOnly->Enable(mMatrices.projection);
-	mShaders.ColourOnly->SetTransformIdentity();
-	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+	EnableShader(mShaders.ColourOnly,0,pRed,pGreen,pBlue,pAlpha);
 
 	VertexPtr(2,GL_SHORT,4,quad);
 	glDrawArrays(GL_LINES,0,2);
@@ -400,10 +393,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 		mWorkBuffers.vec2Df[n].y = y + (r*std::cos(rad));
 	}
 
-	assert(mShaders.ColourOnly);
-	mShaders.ColourOnly->Enable(mMatrices.projection);
-	mShaders.ColourOnly->SetTransformIdentity();
-	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+	EnableShader(mShaders.ColourOnly,0,pRed,pGreen,pBlue,pAlpha);
 
 	VertexPtr(2,GL_FLOAT,8,mWorkBuffers.vec2Df.data());
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,pNumPoints);
@@ -415,34 +405,11 @@ void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_
 	const int16_t quad[8] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY,(int16_t)pFromX,(int16_t)pToY};
 	const int16_t uv[8] = {0,0,1,0,1,1,0,1};
 
-	if( pTexture > 0 )
+	SelectAndEnableShader(pTexture,pRed,pGreen,pBlue,pAlpha);
+
+	if( mShaders.CurrentShader->GetUsesTexture() )
 	{
-		if( mTextures.at(pTexture).mFormat == TextureFormat::FORMAT_ALPHA )
-		{
-			assert(mShaders.TextureAlphaOnly);
-			mShaders.TextureAlphaOnly->Enable(mMatrices.projection);
-			mShaders.TextureAlphaOnly->SetTransformIdentity();
-			mShaders.TextureAlphaOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
-			mShaders.TextureAlphaOnly->SetTexture(pTexture);
-		}
-		else
-		{
-			assert(mShaders.TextureColour);
-			mShaders.TextureColour->Enable(mMatrices.projection);
-			mShaders.TextureColour->SetTransformIdentity();
-			mShaders.TextureColour->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
-			mShaders.TextureColour->SetTexture(pTexture);
-		}
-		glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
 		TexCoordPtr(2,GL_SHORT,4,uv);
-	}
-	else
-	{
-		assert(mShaders.ColourOnly);
-		mShaders.ColourOnly->Enable(mMatrices.projection);
-		mShaders.ColourOnly->SetTransformIdentity();
-		mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
-		glDisableVertexAttribArray((int)StreamIndex::TEXCOORD);
 	}
 
 	VertexPtr(2,GL_SHORT,4,quad);
@@ -505,10 +472,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 		rad -= step;
 	}
 
-	assert(mShaders.ColourOnly);
-	mShaders.ColourOnly->Enable(mMatrices.projection);
-	mShaders.ColourOnly->SetTransformIdentity();
-	mShaders.ColourOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+	EnableShader(mShaders.ColourOnly,0,pRed,pGreen,pBlue,pAlpha);
 
 	VertexPtr(2,GL_FLOAT,8,mWorkBuffers.vec2Df.data());
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,numPoints);
@@ -667,7 +631,7 @@ void GLES::FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,co
  */
 void GLES::DeleteTexture(uint32_t pTexture)
 {
-	if( pTexture == mDebugTexture )
+	if( pTexture == mDiagnostics.texture )
 	{
 		throw std::runtime_error("An attempt was made to delete the debug texture, do not do this!");
 	}
@@ -714,14 +678,8 @@ void GLES::FontPrint(int pX,int pY,const char* pText)
 	}
 
 	// Continue adding uvs to the buffer after the verts.
-
-	assert(mShaders.TextureAlphaOnly);
-	mShaders.TextureAlphaOnly->Enable(mMatrices.projection);
-	mShaders.TextureAlphaOnly->SetTransformIdentity();
-	mShaders.TextureAlphaOnly->SetGlobalColour(mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
-	mShaders.TextureAlphaOnly->SetTexture(mPixelFont.texture);
-
-	glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
+	assert(mPixelFont.texture);
+	EnableShader(mShaders.TextureAlphaOnly,mPixelFont.texture,mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TEXCOORD,
@@ -830,13 +788,8 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 		}
 	}
 
-	assert(mShaders.TextureAlphaOnly);
-	mShaders.TextureAlphaOnly->Enable(mMatrices.projection);
-	mShaders.TextureAlphaOnly->SetTransformIdentity();
-	mShaders.TextureAlphaOnly->SetGlobalColour(font->mColour.R,font->mColour.G,font->mColour.B,font->mColour.A);
-	mShaders.TextureAlphaOnly->SetTexture(font->mTexture);
-
-	glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
+	assert(font->mTexture);
+	EnableShader(mShaders.TextureAlphaOnly,font->mTexture,font->mColour.R,font->mColour.G,font->mColour.B,font->mColour.A);
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TEXCOORD,
@@ -1187,9 +1140,56 @@ void GLES::BuildShaders()
 	mShaders.TextureAlphaOnly = std::make_unique<GLShader>("TextureAlphaOnly",TextureAlphaOnly_VS,TextureAlphaOnly_PS,mVerbose);	
 }
 
+void GLES::SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	assert(mShaders.TextureAlphaOnly);
+	assert(mShaders.TextureColour);
+	assert(mShaders.ColourOnly);
+
+	TinyShader aShader = mShaders.ColourOnly;
+	if( pTexture > 0 )
+	{
+		if( mTextures.at(pTexture).mFormat == TextureFormat::FORMAT_ALPHA )
+		{
+			aShader = mShaders.TextureAlphaOnly;
+		}
+		else
+		{
+			aShader = mShaders.TextureColour;
+		}
+	}
+
+	EnableShader(aShader,pTexture,pRed,pGreen,pBlue,pAlpha);
+}
+
+void GLES::EnableShader(TinyShader pShader,uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	if( mShaders.CurrentShader != pShader )
+	{
+//		VERBOSE_MESSAGE("Enabling shader " << pShader->mName << " in frame " << mDiagnostics.frameNumber << " pTexture = " << pTexture );
+		mShaders.CurrentShader = pShader;
+		pShader->Enable(mMatrices.projection);
+		pShader->SetTransformIdentity();
+	}
+
+	if( pShader->GetUsesTexture() )
+	{
+		assert( pTexture > 0 );
+		glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
+		pShader->SetTexture(pTexture);
+	}
+	else
+	{
+		assert( pTexture == 0 );
+		glDisableVertexAttribArray((int)StreamIndex::TEXCOORD);
+	}
+	
+	pShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+}
+
 void GLES::BuildDebugTexture()
 {
-	VERBOSE_MESSAGE("Creating mDebugTexture");
+	VERBOSE_MESSAGE("Creating mDiagnostics.texture");
 	uint8_t pixels[16*16*4];
 	uint8_t* dst = pixels;
 	for( int y = 0 ; y < 16 ; y++ )
@@ -1207,7 +1207,7 @@ void GLES::BuildDebugTexture()
 			dst+=4;
 		}
 	}
-	mDebugTexture = CreateTexture(16,16,pixels,tinygles::TextureFormat::FORMAT_RGBA);
+	mDiagnostics.texture = CreateTexture(16,16,pixels,tinygles::TextureFormat::FORMAT_RGBA);
 }
 
 void GLES::BuildPixelFontTexture()
@@ -1409,6 +1409,8 @@ void GLShader::BindAttribLocation(int location,const char* pName)
 
 void GLShader::Enable(const Matrix4x4& projInvcam)
 {
+//	VERBOSE_MESSAGE("shader: " << mName << " Enabling shader " << mShader );
+	assert(mShader);
     glUseProgram(mShader);
     CHECK_OGL_ERRORS();
 
@@ -1461,10 +1463,11 @@ void GLShader::SetGlobalColour(float pRed,float pGreen,float pBlue,float pAlpha)
 	glUniform4f(mUniforms.global_colour,pRed,pGreen,pBlue,pAlpha);
 }
 
-void GLShader::SetTexture(GLint texture)
+void GLShader::SetTexture(GLint pTexture)
 {
+	assert(pTexture);
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D,texture);
+	glBindTexture(GL_TEXTURE_2D,pTexture);
 	glUniform1i(mUniforms.tex0,0);
 	CHECK_OGL_ERRORS();
 }

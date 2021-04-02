@@ -90,12 +90,11 @@ int main(int argc, char *argv[])
     {
         anim++;
 
-
-        GL.FillRectangle(0,0,GL.GetWidth(),GL.GetHeight(),GL.GetDebugTexture());
+        GL.FillRectangle(0,0,GL.GetWidth(),GL.GetHeight(),GL.GetDiagnosticsTexture());
 
         GL.FillRoundedRectangle(50,50,950,550,100,55,20,155);
         GL.DrawRoundedRectangle(50,50,950,550,100,255,255,255);
-
+    
         for( auto& b : balls )
         {
             b.Update(GL,ball);
