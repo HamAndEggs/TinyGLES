@@ -78,7 +78,7 @@ enum struct TextureFormat
 {
 	FORMAT_RGBA,
 	FORMAT_RGB,
-	FORMAT_A
+	FORMAT_ALPHA
 };
 
 enum struct StreamIndex
@@ -460,7 +460,17 @@ private:
 	 */
 	uint32_t mDebugTexture = 0;
 
-	std::set<uint32_t> mTextures; //!< Our textures
+	/**
+	 * @brief This is a pain in the arse, because we can't query the values used to create a gl texture we have to store them. horrid API GLES 2.0
+	 */
+	struct GLTexture
+	{
+		uint32_t mHandle;
+		TextureFormat mFormat;
+		int mWidth;
+		int mHeight;
+	};
+	std::map<uint32_t,GLTexture> mTextures; //!< Our textures
 
 	static const std::vector<uint32_t> mFont16x16Data;	//!< used to rebuild font texture.
 	struct

@@ -83,8 +83,8 @@ constexpr std::string_view TextureFormatToString(TextureFormat pFormat)
 	case TextureFormat::FORMAT_RGB:
 		return "FORMAT_RGB";
 
-	case TextureFormat::FORMAT_A:
-		return "FORMAT_A";
+	case TextureFormat::FORMAT_ALPHA:
+		return "FORMAT_ALPHA";
 	}
 	return "Invalid TextureFormat";
 }
@@ -99,7 +99,7 @@ constexpr GLint TextureFormatToGLFormat(TextureFormat pFormat)
 	case TextureFormat::FORMAT_RGBA:
 		return GL_RGBA;
 
-	case TextureFormat::FORMAT_A:
+	case TextureFormat::FORMAT_ALPHA:
 		return GL_ALPHA; // This is mainly used for the fonts.
 	}
 	return GL_INVALID_ENUM;
@@ -252,7 +252,7 @@ GLES::~GLES()
 	// delete all textures.
 	for( auto t : mTextures )
 	{
-		glDeleteTextures(1,(GLuint*)&t);
+		glDeleteTextures(1,&t.second.mHandle);
 	}
 
 	Clear(0,0,0);
@@ -417,15 +417,24 @@ void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_
 
 	if( pTexture > 0 )
 	{
-		assert(mShaders.TextureColour);
-		mShaders.TextureColour->Enable(mMatrices.projection);
-		mShaders.TextureColour->SetTransformIdentity();
-		mShaders.TextureColour->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
-		mShaders.TextureColour->SetTexture(pTexture);
-
+		if( mTextures.at(pTexture).mFormat == TextureFormat::FORMAT_ALPHA )
+		{
+			assert(mShaders.TextureAlphaOnly);
+			mShaders.TextureAlphaOnly->Enable(mMatrices.projection);
+			mShaders.TextureAlphaOnly->SetTransformIdentity();
+			mShaders.TextureAlphaOnly->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+			mShaders.TextureAlphaOnly->SetTexture(pTexture);
+		}
+		else
+		{
+			assert(mShaders.TextureColour);
+			mShaders.TextureColour->Enable(mMatrices.projection);
+			mShaders.TextureColour->SetTransformIdentity();
+			mShaders.TextureColour->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+			mShaders.TextureColour->SetTexture(pTexture);
+		}
 		glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
 		TexCoordPtr(2,GL_SHORT,4,uv);
-
 	}
 	else
 	{
@@ -533,21 +542,25 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,Textu
 		throw std::runtime_error("CreateTexture passed an unknown texture format, I can not continue.");
 	}
 
-	GLuint tex;
-	glGenTextures(1,&tex);
+	GLTexture tex;
+	tex.mFormat = pFormat;
+	tex.mWidth = pWidth;
+	tex.mHeight = pHeight;
+
+	glGenTextures(1,&tex.mHandle);
 	CHECK_OGL_ERRORS();
-	if( tex == 0 )
+	if( tex.mHandle == 0 )
 	{
 		throw std::runtime_error("Failed to create texture, glGenTextures returned zero");
 	}
 
-	if( mTextures.find(tex) != mTextures.end() )
+	if( mTextures.find(tex.mHandle) != mTextures.end() )
 	{
 		throw std::runtime_error("Bug found in GLES code, glGenTextures returned an index that we already know about.");
 	}
-	mTextures.insert(tex);
+	mTextures[tex.mHandle] = tex;
 
-	glBindTexture(GL_TEXTURE_2D,tex);
+	glBindTexture(GL_TEXTURE_2D,tex.mHandle);
 	CHECK_OGL_ERRORS();
 
 	glTexImage2D(
@@ -597,6 +610,18 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,Textu
 		}
 	}
 
+	// If it's alpha only we need to set the texture swizzle for RGB to one.
+	// Leaving in for when I add GLES 3.0 support. But for now, grump, need two textures.
+	// GL_TEXTURE_SWIZZLE_R not supported in GLES 2.0
+	/*
+	if( format == GL_ALPHA )
+	{
+		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_SWIZZLE_R,GL_ONE);
+		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_SWIZZLE_G,GL_ONE);
+		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_SWIZZLE_B,GL_ONE);
+	}
+	*/
+
 	CHECK_OGL_ERRORS();
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -604,10 +629,10 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,Textu
 	glBindTexture(GL_TEXTURE_2D,0);//Because we had to change it to setup the texture! Stupid GL!
 	CHECK_OGL_ERRORS();
 
-	VERBOSE_MESSAGE("Texture " << tex << " created, " << pWidth << "x" << pHeight << " Format = " << TextureFormatToString(pFormat) << " Mipmaps = " << (pGenerateMipmaps?"true":"false") << " Filtered = " << (pFiltered?"true":"false"));
+	VERBOSE_MESSAGE("Texture " << tex.mHandle << " created, " << pWidth << "x" << pHeight << " Format = " << TextureFormatToString(pFormat) << " Mipmaps = " << (pGenerateMipmaps?"true":"false") << " Filtered = " << (pFiltered?"true":"false"));
 
 
-	return tex;
+	return tex.mHandle;
 }
 
 void GLES::FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels,TextureFormat pFormat,bool pGenerateMips)
@@ -742,11 +767,11 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 	font->BuildTexture(
 		[this](int pWidth,int pHeight)
 		{
-			return CreateTexture(pWidth,pHeight,nullptr,TextureFormat::FORMAT_A);
+			return CreateTexture(pWidth,pHeight,nullptr,TextureFormat::FORMAT_ALPHA);
 		},
 		[this](uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels)
 		{
-			FillTexture(pTexture,pX,pY,pWidth,pHeight,pPixels,TextureFormat::FORMAT_A);
+			FillTexture(pTexture,pX,pY,pWidth,pHeight,pPixels,TextureFormat::FORMAT_ALPHA);
 		}
 	);
 
@@ -1202,7 +1227,7 @@ void GLES::BuildPixelFontTexture()
 		}
 	}
 
-	mPixelFont.texture = CreateTexture(256,256,RGBA.data(),tinygles::TextureFormat::FORMAT_A,true);
+	mPixelFont.texture = CreateTexture(256,256,RGBA.data(),tinygles::TextureFormat::FORMAT_ALPHA,true);
 }
 
 void GLES::InitFreeTypeFont()
@@ -1680,7 +1705,6 @@ void FreeTypeFont::BuildTexture(
 {
 
 	int maxX = 0,maxY = 0;
-	int numTextureSlotsNeeded = 0;
 
 	std::array<std::vector<uint8_t>,96>glyphsPixels;
 	for( int c = 0 ; c < 96 ; c++ )// Cheap and quick font ASCII renderer. I'm not geeting into unicode. It's a nightmare to make fast in GL on a resource constrained system!
@@ -1693,7 +1717,6 @@ void FreeTypeFont::BuildTexture(
 			{
 				maxX = std::max(maxX,g.width);
 				maxY = std::max(maxY,g.height);
-				numTextureSlotsNeeded++;
 			}
 			else
 			{
@@ -1701,7 +1724,7 @@ void FreeTypeFont::BuildTexture(
 			}
 		}
 	}
-	VERBOSE_MESSAGE("Font max glyph size requirement for cache is " << maxX << " " << maxY << " num slots needed " << numTextureSlotsNeeded);
+	VERBOSE_MESSAGE("Font max glyph size requirement for cache is " << maxX << " " << maxY);
 	if( maxX > 128 || maxY > 128 )
 	{
 		throw std::runtime_error("Font: " + mFontName + " requires a very large texture as it's maximun size glyph is very big. This creation has been halted. Please reduce size of font!");
