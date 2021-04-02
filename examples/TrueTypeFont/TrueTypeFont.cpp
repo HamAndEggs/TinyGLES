@@ -15,7 +15,8 @@ int main(int argc, char *argv[])
 
     tinygles::GLES GL(true);
 
-    const uint32_t FTFont = GL.FontLoad("./Blenda Script.otf",30,true);
+    const std::string faceName("./Blenda Script.otf");
+    const uint32_t FTFont = GL.FontLoad(faceName,30,true);
 
     int anim = 0;
     while( GL.BeginFrame() )
@@ -27,6 +28,7 @@ int main(int argc, char *argv[])
         GL.DrawRoundedRectangle(50,50,GL.GetWidth()-50,GL.GetHeight()-50,100,255,255,255);
 
         GL.FontPrint(80,80,"The fixed built in font for comparison");
+        GL.FontPrint(FTFont,80,120,"The free type font," + faceName + ", for comparison");
 
         GL.FontPrintf(FTFont,80,200,"Anim: %d",anim);
 

@@ -84,6 +84,10 @@ struct FreeTypeFont
 		int height;
 		int pitch;
 		int advance;
+		struct
+		{// Where, in 16bit UV's, the glyph is.
+			int x,y;
+		}uv[2];
 	};
 
 	FreeTypeFont(FT_Face pFontFace,int pPixelHeight,bool pVerbose);
@@ -722,40 +726,48 @@ void GLES::SetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,ui
 	font->mColour.A = pAlpha;
 }
 
-void GLES::FontPrint(uint32_t pFont,int pX,int pY,const char* pText)
+void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 {
 	auto& font = mFreeTypeFonts.at(pFont);
 //	FillRectangle(10,10,510,510,font->mTexture);
 
-	const std::string_view s(pText);
 	mWorkBuffers.vec2Ds.Reset();
 
 	// Get where the uvs will be written too.
 	const Vec2Ds* verts = mWorkBuffers.vec2Ds.end();
 	const int quadSize = 16 * mPixelFont.scale;
 	const int squishHack = 3 * mPixelFont.scale;
-	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,s.size(),quadSize - squishHack,0);
+	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,pText.size(),quadSize - squishHack,0);
 	// how many?
 	const int numVerts = mWorkBuffers.vec2Ds.size();
 
 	// Get where the uvs will be written too.
-	const int maxUV = 32767;
-	const int charSize = maxUV / 16;
 	const Vec2Ds* uvs = mWorkBuffers.vec2Ds.end();
-	for( auto c : s )
+	for( auto c : pText )
 	{
-		const int x = ((int)c&0x0f) * charSize;
-		const int y = ((int)c>>4) * charSize;
-		mWorkBuffers.vec2Ds.BuildQuad(x+64,y+64,charSize-128,charSize-128);// The +- 64 is because of filtering. Makes font look nice at normal size.
+		if( c > 31 || c < 127 )
+		{
+			auto&g = font->mGlyphs.at(c-32);
+			mWorkBuffers.vec2Ds.AddUVRect(
+					g.uv[0].x,
+					g.uv[0].y,
+					g.uv[1].x,
+					g.uv[1].y);
+
+			pX += g.advance;
+		}
+		else
+		{
+			pX += font->mGlyphs[0].advance;
+		}
 	}
 
-	// Continue adding uvs to the buffer after the verts.
 
 	assert(mShaders.TextureColour);
 	mShaders.TextureColour->Enable(mMatrices.projection);
 	mShaders.TextureColour->SetTransformIdentity();
-	mShaders.TextureColour->SetGlobalColour(mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
-	mShaders.TextureColour->SetTexture(mPixelFont.texture);
+	mShaders.TextureColour->SetGlobalColour(font->mColour.R,font->mColour.G,font->mColour.B,font->mColour.A);
+	mShaders.TextureColour->SetTexture(font->mTexture);
 
 	glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
 
@@ -1644,7 +1656,8 @@ void FreeTypeFont::BuildTexture(
 
 	// Now get filling. Could have a lot of wasted space, but I am not getting into complicated packing algos at load time. Take it offline. :)
 	const int cellWidth = width / 12;
-	const int cellheight = height / 8;
+	const int cellHeight = height / 8;
+	const int maxUV = 32767;
 	int n = 0;
 	uint8_t hack[64*64*4];
 	memset(hack,255,sizeof(hack));
@@ -1655,7 +1668,7 @@ void FreeTypeFont::BuildTexture(
 			auto& g = mGlyphs.at(n);
 			auto& p = glyphsPixels.at(n);
 			const int cx = (x * cellWidth) + (cellWidth/2) - (g.width / 2);
-			const int cy = (y * cellheight) + (cellheight/2) - (g.height / 2);
+			const int cy = (y * cellHeight) + (cellHeight/2) - (g.height / 2);
 			if( p.size() > 0 )
 			{
 				pFillTexture(
@@ -1666,6 +1679,21 @@ void FreeTypeFont::BuildTexture(
 					g.height,
 					p.data()
 					);
+
+				g.uv[0].x = (cx * maxUV) / width;
+				g.uv[0].y = (cy * maxUV) / height;
+				g.uv[1].x = ((cx + g.width) * maxUV)  / width;
+				g.uv[1].y = ((cy + g.height) * maxUV) / height;
+
+				VERBOSE_MESSAGE(g.uv[0].x << " " << g.uv[0].y << " " << g.uv[1].x << " " << g.uv[1].y);
+
+			}
+			else
+			{
+				g.uv[0].x = 0;
+				g.uv[0].y = 0;
+				g.uv[1].x = 0;
+				g.uv[1].y = 0;
 			}
 		}
 	}	

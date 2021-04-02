@@ -126,6 +126,17 @@ template<typename _VertexType> struct VertexBuffer
 		mVerts.emplace_back(pX,pY + pHeight);
 	}
 
+	inline void AddUVRect(int U0,int V0,int U1,int V1)
+	{
+		mVerts.emplace_back(U0,V0);
+		mVerts.emplace_back(U1,V0);
+		mVerts.emplace_back(U1,V1);
+
+		mVerts.emplace_back(U0,V0);
+		mVerts.emplace_back(U1,V1);
+		mVerts.emplace_back(U0,V1);
+	}
+
 	/**
 	 * @brief Adds a number of quads to the buffer, moving STEP for each one.
 	 */
@@ -352,7 +363,7 @@ public:
 
 	void SetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
 
-	void FontPrint(uint32_t pFont,int pX,int pY,const char* pText);
+	void FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText);
 	void FontPrintf(uint32_t pFont,int pX,int pY,const char* pFmt,...);
 
 #endif
