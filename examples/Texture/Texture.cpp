@@ -15,13 +15,13 @@ static uint32_t LoadTexture(tinygles::GLES &GL,const char* pFilename)
         {
             std::vector<uint8_t> RGBA;
             png.GetRGBA(RGBA);
-            textureHandle = GL.CreateTextureRGBA(png.GetWidth(),png.GetHeight(),RGBA.data());
+            textureHandle = GL.CreateTexture(png.GetWidth(),png.GetHeight(),RGBA.data(),tinygles::TextureFormat::FORMAT_RGBA);
         }
         else
         {
             std::vector<uint8_t> RGB;
             png.GetRGB(RGB);
-            textureHandle = GL.CreateTextureRGB(png.GetWidth(),png.GetHeight(),RGB.data());
+            textureHandle = GL.CreateTexture(png.GetWidth(),png.GetHeight(),RGB.data(),tinygles::TextureFormat::FORMAT_RGB);
         }
     }
     assert(textureHandle);

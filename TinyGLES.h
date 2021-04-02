@@ -27,6 +27,8 @@
 #include <set>
 #include <vector>
 #include <map>
+#include <string_view>
+
 #include <signal.h>
 #include <assert.h>
 
@@ -58,7 +60,7 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
  * I would like to add more custom events too like network status events. Time will tell.
  * All event processing is done at the end of the frame in the main thread.
  */
-enum SystemEventType
+enum struct SystemEventType
 {
 	// Generic system events, like ctrl + c
 	SYSTEM_EVENT_EXIT_REQUEST,	//!< User closed the window or pressed ctrl + c
@@ -67,6 +69,16 @@ enum SystemEventType
 	SYSTEM_EVENT_POINTER_MOVE,
 	SYSTEM_EVENT_POINTER_DOWN,
 	SYSTEM_EVENT_POINTER_UP
+};
+
+/**
+ * @brief The texture formats that I expose and support. Don't want to get too silly here, these are more than enough.
+ */
+enum struct TextureFormat
+{
+	FORMAT_RGBA,
+	FORMAT_RGB,
+	FORMAT_A
 };
 
 enum struct StreamIndex
@@ -321,15 +333,13 @@ public:
 	 * pPixels is either RGB format 24bit or RGBA 32bit format is pHasAlpha is true.
 	 * pPixels can be null if you're going to use FillTexture later to set the image data.
 	 */
-	uint32_t CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha = false,bool pFiltered = false,bool pGenerateMipmaps = false);
-	inline uint32_t CreateTextureRGB(int pWidth,int pHeight,const uint8_t* pPixels,bool pFiltered = false,bool pGenerateMipmaps = false){return CreateTexture(pWidth,pHeight,pPixels,false,pFiltered,pGenerateMipmaps);}
-	inline uint32_t CreateTextureRGBA(int pWidth,int pHeight,const uint8_t* pPixels,bool pFiltered = false,bool pGenerateMipmaps = false){return CreateTexture(pWidth,pHeight,pPixels,true,pFiltered,pGenerateMipmaps);}
+	uint32_t CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,TextureFormat pFormat,bool pFiltered = false,bool pGenerateMipmaps = false);
 
 	/**
 	 * @brief Fill a sub rectangle, or the whole texture. Pixels is expected to be a continuous image data. So it's size is WidthxHeight of the region being updated.
 	 * Pixels must be in the format that the texture was originally created with.
 	 */
-	void FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha = false,bool pGenerateMips = false);
+	void FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels,TextureFormat pFormat = TextureFormat::FORMAT_RGB,bool pGenerateMips = false);
 
 	/**
 	 * @brief Delete the texture, will throw an exception is texture not found.
@@ -359,9 +369,9 @@ public:
 #ifdef USE_FREETYPEFONTS
 
 	uint32_t FontLoad(const std::string& pFontName,int pPixelHeight = 40,bool pVerbose = false);
-	void DeleteFont(uint32_t pFont);
+	void FontDelete(uint32_t pFont);
 
-	void SetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
+	void FontSetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
 
 	void FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText);
 	void FontPrintf(uint32_t pFont,int pX,int pY,const char* pFmt,...);
@@ -481,6 +491,7 @@ private:
 	{
 		std::unique_ptr<GLShader> ColourOnly;
 		std::unique_ptr<GLShader> TextureColour;
+		std::unique_ptr<GLShader> TextureAlphaOnly;
 	}mShaders;
 
 	struct

@@ -50,10 +50,6 @@
                 "GLESv2",
                 "EGL"
             ],
-            "libpaths":
-            [
-                "/opt/vc/lib"
-            ],
             "define": [
                 "DEBUG_BUILD",
                 "PLATFORM_GLES"

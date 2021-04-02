@@ -22,7 +22,7 @@ static uint32_t MakeStartingTexture(tinygles::GLES& GL)
 		}
 	}
 	
-    return GL.CreateTextureRGBA(32,16,pixels);
+    return GL.CreateTexture(32,16,pixels,tinygles::TextureFormat::FORMAT_RGBA);
 }
 
 struct ABall

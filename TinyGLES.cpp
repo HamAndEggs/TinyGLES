@@ -70,6 +70,41 @@ constexpr float ColourToFloat(uint8_t pColour)
 	return (float)pColour / 255.0f;
 }
 
+/**
+ * @brief Mainly for debugging, returns a string representation of the enum.
+ */
+constexpr std::string_view TextureFormatToString(TextureFormat pFormat)
+{
+	switch( pFormat )
+	{
+	case TextureFormat::FORMAT_RGBA:
+		return "FORMAT_RGBA";
+		
+	case TextureFormat::FORMAT_RGB:
+		return "FORMAT_RGB";
+
+	case TextureFormat::FORMAT_A:
+		return "FORMAT_A";
+	}
+	return "Invalid TextureFormat";
+}
+ 
+constexpr GLint TextureFormatToGLFormat(TextureFormat pFormat)
+{
+	switch( pFormat )
+	{
+	case TextureFormat::FORMAT_RGB:
+		return GL_RGB;
+
+	case TextureFormat::FORMAT_RGBA:
+		return GL_RGBA;
+
+	case TextureFormat::FORMAT_A:
+		return GL_ALPHA; // This is mainly used for the fonts.
+	}
+	return GL_INVALID_ENUM;
+}
+
 #ifdef USE_FREETYPEFONTS
 /**
  * @brief Optional freetype font library support. Is optional as the code is dependant on a library tha may not be avalibel for the host platform.
@@ -228,6 +263,7 @@ GLES::~GLES()
 	// Kill shaders.
 	mShaders.ColourOnly.release();
 	mShaders.TextureColour.release();
+	mShaders.TextureAlphaOnly.release();
 
 	eglSwapBuffers(mDisplay,mSurface);
     eglDestroyContext(mDisplay, mContext);
@@ -314,7 +350,7 @@ void GLES::OnApplicationExitRequest()
 	mKeepGoing = false;
 	if( mSystemEventHandler != nullptr )
 	{
-		SystemEventData data(SYSTEM_EVENT_EXIT_REQUEST);
+		SystemEventData data(SystemEventType::SYSTEM_EVENT_EXIT_REQUEST);
 		mSystemEventHandler(data);
 	}
 }
@@ -475,7 +511,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 
 //*******************************************
 // Texture commands.
-uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha,bool pFiltered,bool pGenerateMipmaps)
+uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,TextureFormat pFormat,bool pFiltered,bool pGenerateMipmaps)
 {
 	// pPixels can be null if you're going to fill it later.
 	// But there is a gotcha, if you don't write to all the pixels the texture will not work.
@@ -491,8 +527,11 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool 
 		pPixels = mWorkBuffers.zeroPixels.data();
 	}
 
-	GLint format = pHasAlpha?GL_RGBA:GL_RGB;
-	GLint gl_format = GL_UNSIGNED_BYTE;
+	const GLint format = TextureFormatToGLFormat(pFormat);
+	if( format == GL_INVALID_ENUM )
+	{
+		throw std::runtime_error("CreateTexture passed an unknown texture format, I can not continue.");
+	}
 
 	GLuint tex;
 	glGenTextures(1,&tex);
@@ -519,7 +558,7 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool 
 		pHeight,
 		0,
 		format,
-		gl_format,
+		GL_UNSIGNED_BYTE,
 		pPixels);
 
 	CHECK_OGL_ERRORS();
@@ -565,17 +604,21 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,bool 
 	glBindTexture(GL_TEXTURE_2D,0);//Because we had to change it to setup the texture! Stupid GL!
 	CHECK_OGL_ERRORS();
 
-	VERBOSE_MESSAGE("Texture " << tex << " created, " << pWidth << "x" << pHeight << " Alpha = " << (pHasAlpha?"true":"false") << " Mipmaps = " << (pGenerateMipmaps?"true":"false") << " Filtered = " << (pFiltered?"true":"false"));
+	VERBOSE_MESSAGE("Texture " << tex << " created, " << pWidth << "x" << pHeight << " Format = " << TextureFormatToString(pFormat) << " Mipmaps = " << (pGenerateMipmaps?"true":"false") << " Filtered = " << (pFiltered?"true":"false"));
 
 
 	return tex;
 }
 
-void GLES::FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels,bool pHasAlpha,bool pGenerateMips)
+void GLES::FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels,TextureFormat pFormat,bool pGenerateMips)
 {
 	glBindTexture(GL_TEXTURE_2D,pTexture);
 
-	GLint format = pHasAlpha?GL_RGBA:GL_RGB;
+	const GLint format = TextureFormatToGLFormat(pFormat);
+	if( format == GL_INVALID_ENUM )
+	{
+		throw std::runtime_error("FillTexture passed an unknown texture format, I can not continue.");
+	}
 
 	glTexSubImage2D(GL_TEXTURE_2D,
 		0,
@@ -647,11 +690,11 @@ void GLES::FontPrint(int pX,int pY,const char* pText)
 
 	// Continue adding uvs to the buffer after the verts.
 
-	assert(mShaders.TextureColour);
-	mShaders.TextureColour->Enable(mMatrices.projection);
-	mShaders.TextureColour->SetTransformIdentity();
-	mShaders.TextureColour->SetGlobalColour(mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
-	mShaders.TextureColour->SetTexture(mPixelFont.texture);
+	assert(mShaders.TextureAlphaOnly);
+	mShaders.TextureAlphaOnly->Enable(mMatrices.projection);
+	mShaders.TextureAlphaOnly->SetTransformIdentity();
+	mShaders.TextureAlphaOnly->SetGlobalColour(mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
+	mShaders.TextureAlphaOnly->SetTexture(mPixelFont.texture);
 
 	glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
 
@@ -699,11 +742,11 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 	font->BuildTexture(
 		[this](int pWidth,int pHeight)
 		{
-			return CreateTexture(pWidth,pHeight,nullptr,true);
+			return CreateTexture(pWidth,pHeight,nullptr,TextureFormat::FORMAT_A);
 		},
 		[this](uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels)
 		{
-			FillTexture(pTexture,pX,pY,pWidth,pHeight,pPixels,true);
+			FillTexture(pTexture,pX,pY,pWidth,pHeight,pPixels,TextureFormat::FORMAT_A);
 		}
 	);
 
@@ -712,12 +755,12 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 	return fontID;
 }
 
-void GLES::DeleteFont(uint32_t pFont)
+void GLES::FontDelete(uint32_t pFont)
 {
 	mFreeTypeFonts.erase(pFont);
 }
 
-void GLES::SetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+void GLES::FontSetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
 {
 	auto& font = mFreeTypeFonts.at(pFont);
 	font->mColour.R = pRed;
@@ -762,12 +805,11 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 		}
 	}
 
-
-	assert(mShaders.TextureColour);
-	mShaders.TextureColour->Enable(mMatrices.projection);
-	mShaders.TextureColour->SetTransformIdentity();
-	mShaders.TextureColour->SetGlobalColour(font->mColour.R,font->mColour.G,font->mColour.B,font->mColour.A);
-	mShaders.TextureColour->SetTexture(font->mTexture);
+	assert(mShaders.TextureAlphaOnly);
+	mShaders.TextureAlphaOnly->Enable(mMatrices.projection);
+	mShaders.TextureAlphaOnly->SetTransformIdentity();
+	mShaders.TextureAlphaOnly->SetGlobalColour(font->mColour.R,font->mColour.G,font->mColour.B,font->mColour.A);
+	mShaders.TextureAlphaOnly->SetTexture(font->mTexture);
 
 	glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
 
@@ -817,7 +859,7 @@ void GLES::ProcessSystemEvents()
 				switch (ev.code)
 				{
 				case BTN_TOUCH:
-					SystemEventData data((ev.value != 0) ? SYSTEM_EVENT_POINTER_DOWN : SYSTEM_EVENT_POINTER_UP);
+					SystemEventData data((ev.value != 0) ? SystemEventType::SYSTEM_EVENT_POINTER_DOWN : SystemEventType::SYSTEM_EVENT_POINTER_UP);
 					data.mPointer.X = mPointer.mCurrent.x;
 					data.mPointer.Y = mPointer.mCurrent.y;
 					mSystemEventHandler(data);
@@ -836,7 +878,7 @@ void GLES::ProcessSystemEvents()
 					mPointer.mCurrent.y = ev.value;
 					break;
 				}
-				SystemEventData data(SYSTEM_EVENT_POINTER_MOVE);
+				SystemEventData data(SystemEventType::SYSTEM_EVENT_POINTER_MOVE);
 				data.mPointer.X = mPointer.mCurrent.x;
 				data.mPointer.Y = mPointer.mCurrent.y;
 				mSystemEventHandler(data);
@@ -1089,7 +1131,35 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.TextureColour = std::make_unique<GLShader>("TextureColour",TextureColour_VS,TextureColour_PS,mVerbose);	
+	mShaders.TextureColour = std::make_unique<GLShader>("TextureColour",TextureColour_VS,TextureColour_PS,mVerbose);
+
+	const char* TextureAlphaOnly_VS = R"(
+		uniform mat4 u_proj_cam;
+		uniform mat4 u_trans;
+		uniform vec4 u_global_colour;
+		attribute vec4 a_xyz;
+		attribute vec2 a_uv0;
+		varying vec4 v_col;
+		varying vec2 v_tex0;
+		void main(void)
+		{
+			v_col = u_global_colour;
+			v_tex0 = a_uv0;
+			gl_Position = u_proj_cam * (u_trans * a_xyz);
+		}
+	)";
+
+	const char *TextureAlphaOnly_PS = R"(
+		varying vec4 v_col;
+		varying vec2 v_tex0;
+		uniform sampler2D u_tex0;
+		void main(void)
+		{
+			gl_FragColor = v_col * texture2D(u_tex0,v_tex0).aaaa;
+		}
+	)";
+
+	mShaders.TextureAlphaOnly = std::make_unique<GLShader>("TextureAlphaOnly",TextureAlphaOnly_VS,TextureAlphaOnly_PS,mVerbose);	
 }
 
 void GLES::BuildDebugTexture()
@@ -1112,13 +1182,13 @@ void GLES::BuildDebugTexture()
 			dst+=4;
 		}
 	}
-	mDebugTexture = CreateTextureRGBA(16,16,pixels);
+	mDebugTexture = CreateTexture(16,16,pixels,tinygles::TextureFormat::FORMAT_RGBA);
 }
 
 void GLES::BuildPixelFontTexture()
 {
-	// This is alpha only data. So we need to padd it out.
-	std::array<uint8_t,256*256*4>RGBA;
+	// This is alpha 4bits per pixel data. So we need to pad it out.
+	std::array<uint8_t,256*256>RGBA;
 	int n = 0;
 	for( auto dword : mFont16x16Data )
 	{
@@ -1128,15 +1198,11 @@ void GLES::BuildPixelFontTexture()
 			const uint32_t mask = (15<<shift);
 
 			uint8_t a = (uint8_t)((dword&mask)>>shift);
-			RGBA[n + 0] = 255;
-			RGBA[n + 1] = 255;
-			RGBA[n + 2] = 255;
-			RGBA[n + 3] = a<<4|a;
-			n += 4;
+			RGBA[n++] = a<<4|a;
 		}
 	}
 
-	mPixelFont.texture = CreateTextureRGBA(256,256,RGBA.data(),true);
+	mPixelFont.texture = CreateTexture(256,256,RGBA.data(),tinygles::TextureFormat::FORMAT_A,true);
 }
 
 void GLES::InitFreeTypeFont()
@@ -1571,8 +1637,8 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 	//   to this glyph
 	rGlyph.advance = mFace->glyph->metrics.horiAdvance / 64;
 
-// I should add support for alpha only textures...
-	const size_t expectedSize = mFace->glyph->bitmap.rows * mFace->glyph->bitmap.pitch * 4;
+	// It's an alpha only texture
+	const size_t expectedSize = mFace->glyph->bitmap.rows * mFace->glyph->bitmap.pitch;
 	// Some have no pixels, and so we just stop here.
 	if(expectedSize == 0)
 	{
@@ -1582,16 +1648,21 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 
 	assert(mFace->glyph->bitmap.buffer);
 
-	rPixels.reserve(expectedSize);
-	const uint8_t* src = mFace->glyph->bitmap.buffer;
-	for (int i = 0; i < (int)mFace->glyph->bitmap.rows; i++ , src += mFace->glyph->bitmap.pitch )
+	if( mFace->glyph->bitmap.pitch == mFace->glyph->bitmap.width )
+	{// Quick path. Normally taken.
+		rPixels.resize(expectedSize);
+		memcpy(rPixels.data(),mFace->glyph->bitmap.buffer,expectedSize);
+	}
+	else
 	{
-		for (int j = 0; j < (int)mFace->glyph->bitmap.width; j++ )
+		rPixels.reserve(expectedSize);
+		const uint8_t* src = mFace->glyph->bitmap.buffer;
+		for (int i = 0; i < (int)mFace->glyph->bitmap.rows; i++ , src += mFace->glyph->bitmap.pitch )
 		{
-			rPixels.push_back(255);
-			rPixels.push_back(255);
-			rPixels.push_back(255);
-			rPixels.push_back(src[j]);
+			for (int j = 0; j < (int)mFace->glyph->bitmap.width; j++ )
+			{
+				rPixels.push_back(src[j]);
+			}
 		}
 	}
 
@@ -1659,8 +1730,6 @@ void FreeTypeFont::BuildTexture(
 	const int cellHeight = height / 8;
 	const int maxUV = 32767;
 	int n = 0;
-	uint8_t hack[64*64*4];
-	memset(hack,255,sizeof(hack));
 	for( int y = 0 ; y < 8 ; y++ )
 	{
 		for( int x = 0 ; x < 12 ; x++, n++ )
@@ -1684,9 +1753,6 @@ void FreeTypeFont::BuildTexture(
 				g.uv[0].y = (cy * maxUV) / height;
 				g.uv[1].x = ((cx + g.width) * maxUV)  / width;
 				g.uv[1].y = ((cy + g.height) * maxUV) / height;
-
-				VERBOSE_MESSAGE(g.uv[0].x << " " << g.uv[0].y << " " << g.uv[1].x << " " << g.uv[1].y);
-
 			}
 			else
 			{

@@ -10,6 +10,7 @@
         {
             "default": true,
             "enable_all_warnings": false,
+            "standard": "c++17",
             "include":
             [
                 "/opt/vc/include/",
@@ -38,6 +39,7 @@
         {
             "default": false,
             "enable_all_warnings": false,
+            "standard": "c++17",
             "include":
             [
                 "../.."
@@ -50,10 +52,6 @@
                 "GLESv2",
                 "EGL",
                 "z"
-            ],
-            "libpaths":
-            [
-                "/opt/vc/lib"
             ],
             "define": [
                 "DEBUG_BUILD",
