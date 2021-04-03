@@ -32,12 +32,48 @@
 #include <signal.h>
 #include <assert.h>
 
-#include "GLES2/gl2.h" //sudo apt install libgles2-mesa-dev
-#include "EGL/egl.h"
+/**
+ * @brief The TinyGLES is targeting systems without a desktop, but sometimes we want to develop on a system with it.
+ * This define allows that. But is expected to be used ONLY for development.
+ * To set window draw size define X11_EMULATION_WIDTH and X11_EMULATION_HEIGHT in your build settings.
+ * These below are here for default behaviour.
+ * Doing this saves on params that are not needed 99% of the time.
+ */
+#ifdef PLATFORM_X11_GL
+	#define GL_GLEXT_PROTOTYPES
+	#include <X11/Xlib.h>
+	#include <X11/Xutil.h>
+	#include <GL/gl.h>
+	#include <GL/glext.h>
+	#include <GL/glx.h>
+	#include <GL/glu.h>
 
-#ifdef PLATFORM_BROADCOM_GLES
-// All included from /opt/vc/include
+	#ifndef X11_EMULATION_WIDTH
+		#define X11_EMULATION_WIDTH 1024
+	#endif
+
+	#ifndef X11_EMULATION_HEIGHT
+		#define X11_EMULATION_HEIGHT 600
+	#endif
+	/**
+	 * @brief Emulate GLES with GL and X11, some defines to make the implementation cleaner, this is for development, I hate it adds loads of #ifdef's this should stop that.
+	 */
+	#define eglSwapBuffers(DISPLAY__,SURFACE__)			(mNativeWindow->RedrawWindow())
+	#define eglDestroyContext(DISPLAY__, CONTEXT__)
+	#define eglDestroySurface(DISPLAY__, SURFACE__)
+	#define eglTerminate(DISPLAY__)
+	#define eglSwapInterval(DISPLAY__,INTERVAL__)
+	#define glColorMask(RED__,GREEN__,BLUE__,ALPHA__)
+
+#endif
+
+#ifdef BROADCOM_NATIVE_WINDOW // All included from /opt/vc/include
 	#include "bcm_host.h"
+#endif
+
+#ifdef PLATFORM_GLES
+	#include "GLES2/gl2.h"
+	#include "EGL/egl.h"
 #endif
 
 /**
@@ -49,7 +85,6 @@
 	#include <freetype2/ft2build.h> //sudo apt install libfreetype6-dev
 	#include FT_FREETYPE_H
 #endif
-
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -63,12 +98,12 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 enum struct SystemEventType
 {
 	// Generic system events, like ctrl + c
-	SYSTEM_EVENT_EXIT_REQUEST,	//!< User closed the window or pressed ctrl + c
+	EXIT_REQUEST,	//!< User closed the window or pressed ctrl + c
 
 	// Generic display mouse or touch events.
-	SYSTEM_EVENT_POINTER_MOVE,
-	SYSTEM_EVENT_POINTER_DOWN,
-	SYSTEM_EVENT_POINTER_UP
+	POINTER_MOVE,
+	POINTER_DOWN,
+	POINTER_UP
 };
 
 /**
@@ -110,10 +145,8 @@ struct SystemEventData
 
 // Forward decleration of internal types.
 typedef std::shared_ptr<struct GLShader> TinyShader;
-
-#ifdef USE_FREETYPEFONTS
-	struct FreeTypeFont;
-#endif
+struct X11GLEmulation;
+struct FreeTypeFont;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // vertex buffer utility
@@ -308,9 +341,9 @@ public:
 	/**
 	 * @brief Draws a circle using the pNumPoints to guide how many to use. I have set it to a nice default if < 1 -> 3 + (std::sqrt(pRadius)*3)
 	 */
-	void Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,int pNumPoints,bool pFilled);
-	inline void DrawCircle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,int pNumPoints = 0){Circle(pCenterX,pCenterY,pRadius,pRed,pGreen,pBlue,pAlpha,pNumPoints,false);}
-	inline void FillCircle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,int pNumPoints = 0){Circle(pCenterX,pCenterY,pRadius,pRed,pGreen,pBlue,pAlpha,pNumPoints,true);}
+	void Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,size_t pNumPoints,bool pFilled);
+	inline void DrawCircle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,size_t pNumPoints = 0){Circle(pCenterX,pCenterY,pRadius,pRed,pGreen,pBlue,pAlpha,pNumPoints,false);}
+	inline void FillCircle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255,size_t pNumPoints = 0){Circle(pCenterX,pCenterY,pRadius,pRed,pGreen,pBlue,pAlpha,pNumPoints,true);}
 
 	/**
 	 * @brief Draws a rectangle with the passed in RGB values either filled or not.
@@ -444,17 +477,22 @@ private:
 	int mWidth = 0;
 	int mHeight = 0;
 
+#ifdef PLATFORM_GLES
 	EGLDisplay mDisplay = nullptr;				//!<GL display
 	EGLSurface mSurface = nullptr;				//!<GL rendering surface
 	EGLContext mContext = nullptr;				//!<GL rendering context
 	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
     EGLint mMajorVersion = 0;					//!<Major version number of GLES we are running on.
 	EGLint mMinorVersion = 0;					//!<Minor version number of GLES we are running on.
+	#ifdef BROADCOM_NATIVE_WINDOW
+		EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
+	#else 
+		EGLNativeWindowType mNativeWindow;
+	#endif
+#endif
 
-#ifdef PLATFORM_BROADCOM_GLES
-    EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
-#else
-	EGLNativeWindowType mNativeWindow;
+#ifdef PLATFORM_X11_GL
+	X11GLEmulation* mNativeWindow;
 #endif
 
 	struct

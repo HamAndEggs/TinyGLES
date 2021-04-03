@@ -37,7 +37,6 @@
 #include <linux/fb.h>
 #include <linux/videodev2.h>
 
-
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 #ifdef DEBUG_BUILD
@@ -192,6 +191,43 @@ struct GLShader
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// X11 GL emulation hidden definition.
+// Implementation is at the bottom of the source file.
+// This code is intended to allow development on a full desktop system for applications that
+// will eventually be deployed on a minimal linux system without all the X11 + fancy UI rendering bloat.
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+#ifdef PLATFORM_X11_GL
+/**
+ * @brief Emulation layer for X11
+ * 
+ */
+struct X11GLEmulation
+{
+	const bool mVerbose;
+	Display *mDisplay = nullptr;
+	Window mWindow = 0;
+	Atom mDeleteMessage;
+	GLXContext mGLXContext = 0;
+
+	bool mWindowReady;
+
+	X11GLEmulation(bool pVerbose);
+	~X11GLEmulation();
+
+	/**
+	 * @brief Processes the X11 events then exits when all are done. Returns true if the app is asked to quit.
+	 */
+	bool ProcessX11Events(tinygles::GLES::SystemEventHandler pEventHandler);
+
+	/**
+	 * @brief Draws the frame buffer to the X11 window.
+	 * 
+	 */
+	void RedrawWindow();
+};
+#endif //#ifdef USE_X11_EMULATION
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // GLES Implementation
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 GLES::GLES(bool pVerbose) :
@@ -235,6 +271,21 @@ GLES::GLES(bool pVerbose) :
 
 GLES::~GLES()
 {
+	VERBOSE_MESSAGE("GLES destructor called");
+	glBindTexture(GL_TEXTURE_2D,0);
+	CHECK_OGL_ERRORS();
+
+	// Kill shaders.
+	VERBOSE_MESSAGE("Deleting shaders");
+
+	glUseProgram(0);
+	CHECK_OGL_ERRORS();
+
+	mShaders.CurrentShader.reset();
+	mShaders.ColourOnly.reset();
+	mShaders.TextureColour.reset();
+	mShaders.TextureAlphaOnly.reset();
+
 	// delete all free type fonts.
 #ifdef USE_FREETYPEFONTS
 	mFreeTypeFonts.clear();
@@ -247,28 +298,30 @@ GLES::~GLES()
 		}
 	}
 #endif
-
 	// delete all textures.
 	for( auto t : mTextures )
 	{
 		glDeleteTextures(1,&t.second.mHandle);
+		CHECK_OGL_ERRORS();
 	}
 
-	Clear(0,0,0);
-	eglSwapBuffers(mDisplay,mSurface);
-	glFlush();
-	glFinish();
+	VERBOSE_MESSAGE("Clearing display");
+//	Clear(0,0,0);
+//	eglSwapBuffers(mDisplay,mSurface);
+//	glFlush();
+//	glFinish();
+//	CHECK_OGL_ERRORS();
 
-	// Kill shaders.
-	mShaders.CurrentShader.reset();
-	mShaders.ColourOnly.reset();
-	mShaders.TextureColour.reset();
-	mShaders.TextureAlphaOnly.reset();
-
-	eglSwapBuffers(mDisplay,mSurface);
-    eglDestroyContext(mDisplay, mContext);
+	VERBOSE_MESSAGE("Destroying contect");
+	eglDestroyContext(mDisplay, mContext);
     eglDestroySurface(mDisplay, mSurface);
     eglTerminate(mDisplay);
+
+#ifdef PLATFORM_X11_GL
+	delete mNativeWindow;
+#endif
+
+	VERBOSE_MESSAGE("All done");
 }
 
 bool GLES::BeginFrame()
@@ -350,7 +403,7 @@ void GLES::OnApplicationExitRequest()
 	mKeepGoing = false;
 	if( mSystemEventHandler != nullptr )
 	{
-		SystemEventData data(SystemEventType::SYSTEM_EVENT_EXIT_REQUEST);
+		SystemEventData data(SystemEventType::EXIT_REQUEST);
 		mSystemEventHandler(data);
 	}
 }
@@ -368,7 +421,7 @@ void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGr
 	CHECK_OGL_ERRORS();
 }
 
-void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,int pNumPoints,bool pFilled)
+void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,size_t pNumPoints,bool pFilled)
 {
 	if( pNumPoints < 1 )
 	{
@@ -387,7 +440,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	const float r = (float)pRadius;
 	const float x = (float)pCenterX;
 	const float y = (float)pCenterY;
-	for( int n = 0 ; n < pNumPoints ; n++, rad += step )
+	for( size_t n = 0 ; n < pNumPoints ; n++, rad += step )
 	{
 		mWorkBuffers.vec2Df[n].x = x - (r*std::sin(rad));
 		mWorkBuffers.vec2Df[n].y = y + (r*std::cos(rad));
@@ -419,7 +472,7 @@ void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_
 
 void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled)
 {
-    int numPoints = (int)(7 + (std::sqrt(pRadius)*3));
+    size_t numPoints = (int)(7 + (std::sqrt(pRadius)*3));
 
 	// Need a multiple of 4 points.
 	numPoints = (numPoints+3)&~3;
@@ -440,7 +493,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 	pFromX += pRadius;
 	pFromY += pRadius;
 
-	for( int n = 0 ; n < numPoints/4 ; n++ )
+	for( size_t n = 0 ; n < numPoints/4 ; n++ )
 	{
 		p->x = pFromX + (r*std::sin(rad));
 		p->y = pToY + (r*std::cos(rad));
@@ -448,7 +501,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 		rad -= step;
 	}
 
-	for( int n = 0 ; n < numPoints/4 ; n++ )
+	for( size_t n = 0 ; n < numPoints/4 ; n++ )
 	{
 		p->x = pFromX + (r*std::sin(rad));
 		p->y = pFromY + (r*std::cos(rad));
@@ -456,7 +509,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 		rad -= step;
 	}
 
-	for( int n = 0 ; n < numPoints/4 ; n++ )
+	for( size_t n = 0 ; n < numPoints/4 ; n++ )
 	{
 		p->x = pToX + (r*std::sin(rad));
 		p->y = pFromY + (r*std::cos(rad));
@@ -464,7 +517,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 		rad -= step;
 	}
 
-	for( int n = 0 ; n < numPoints/4 ; n++ )
+	for( size_t n = 0 ; n < numPoints/4 ; n++ )
 	{
 		p->x = pToX + (r*std::sin(rad));
 		p->y = pToY + (r*std::cos(rad));
@@ -818,6 +871,13 @@ void GLES::FontPrintf(uint32_t pFont,int pX,int pY,const char* pFmt,...)
 
 void GLES::ProcessSystemEvents()
 {
+#ifdef PLATFORM_X11_GL
+	if( mNativeWindow )
+	{
+		mCTRL_C_Pressed = mNativeWindow->ProcessX11Events(mSystemEventHandler);
+	}
+#endif
+
 	// We don't bother to read the mouse if no pEventHandler has been registered. Would be a waste of time.
 	if( mPointer.mDevice > 0 && mSystemEventHandler )
 	{
@@ -837,7 +897,7 @@ void GLES::ProcessSystemEvents()
 				switch (ev.code)
 				{
 				case BTN_TOUCH:
-					SystemEventData data((ev.value != 0) ? SystemEventType::SYSTEM_EVENT_POINTER_DOWN : SystemEventType::SYSTEM_EVENT_POINTER_UP);
+					SystemEventData data((ev.value != 0) ? SystemEventType::POINTER_DOWN : SystemEventType::POINTER_UP);
 					data.mPointer.X = mPointer.mCurrent.x;
 					data.mPointer.Y = mPointer.mCurrent.y;
 					mSystemEventHandler(data);
@@ -856,7 +916,7 @@ void GLES::ProcessSystemEvents()
 					mPointer.mCurrent.y = ev.value;
 					break;
 				}
-				SystemEventData data(SystemEventType::SYSTEM_EVENT_POINTER_MOVE);
+				SystemEventData data(SystemEventType::POINTER_MOVE);
 				data.mPointer.X = mPointer.mCurrent.x;
 				data.mPointer.Y = mPointer.mCurrent.y;
 				mSystemEventHandler(data);
@@ -876,6 +936,7 @@ void GLES::ProcessSystemEvents()
 
 void GLES::FetchDisplayMode()
 {
+#ifdef PLATFORM_GLES
 	struct fb_var_screeninfo vinfo;
 	{
 		int File = open("/dev/fb0", O_RDWR);
@@ -893,16 +954,23 @@ void GLES::FetchDisplayMode()
 	{
 		throw std::runtime_error("failed to find sensible screen mode from /dev/fb0");
 	}
+#endif
 
-	VERBOSE_MESSAGE("Display resolution is " << mWidth << "x" << mHeight );		
+#ifdef PLATFORM_X11_GL
+	mWidth = X11_EMULATION_WIDTH;
+	mHeight = X11_EMULATION_HEIGHT;
+#endif
+
+	VERBOSE_MESSAGE("Display resolution is " << mWidth << "x" << mHeight );
 }
 
 void GLES::InitialiseDisplay()
 {
-#ifdef PLATFORM_BROADCOM_GLES
+#ifdef BROADCOM_NATIVE_WINDOW
 	bcm_host_init();
 #endif
 
+#ifdef PLATFORM_GLES
 	VERBOSE_MESSAGE("Calling eglGetDisplay");
 	mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 	if( !mDisplay )
@@ -919,10 +987,17 @@ void GLES::InitialiseDisplay()
 	VERBOSE_MESSAGE("GLES version " << mMajorVersion << "." << mMinorVersion);
 	eglBindAPI(EGL_OPENGL_ES_API);
 	CHECK_OGL_ERRORS();
+#endif //#ifdef PLATFORM_GLES
+
+#ifdef PLATFORM_X11_GL
+	mNativeWindow = new X11GLEmulation(mVerbose);
+#endif
+
 }
 
 void GLES::FindGLESConfiguration()
 {
+#ifdef PLATFORM_GLES
 	int depths_32_to_16[3] = {32,24,16};
 
 	for( int c = 0 ; c < 3 ; c++ )
@@ -970,11 +1045,12 @@ void GLES::FindGLESConfiguration()
 		}
 	}
 	throw std::runtime_error("No matching EGL configs found");
-
+#endif //#ifdef PLATFORM_GLES
 }
 
 void GLES::CreateRenderingContext()
 {
+#ifdef PLATFORM_GLES
 	//We have our display and have chosen the config so now we are ready to create the rendering context.
 	VERBOSE_MESSAGE("Creating context");
 	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
@@ -985,7 +1061,7 @@ void GLES::CreateRenderingContext()
 	}
 
 // This is annoying but GLES is just broken on RPi and always has been.
-#ifdef PLATFORM_BROADCOM_GLES
+#ifdef BROADCOM_NATIVE_WINDOW
 	VC_RECT_T dst_rect;
 	VC_RECT_T src_rect;
 
@@ -1018,7 +1094,7 @@ void GLES::CreateRenderingContext()
 	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
 #else
 	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
-#endif //PLATFORM_BROADCOM_GLES
+#endif //BROADCOM_NATIVE_WINDOW
 
 
 	CHECK_OGL_ERRORS();
@@ -1026,19 +1102,18 @@ void GLES::CreateRenderingContext()
 	eglQuerySurface(mDisplay, mSurface,EGL_WIDTH,  &mWidth);
 	eglQuerySurface(mDisplay, mSurface,EGL_HEIGHT, &mHeight);
 	CHECK_OGL_ERRORS();
-
-	VERBOSE_MESSAGE("Display resolution is " << mWidth << "x" << mHeight );
+#endif //#ifdef PLATFORM_GLES
 }
 
 void GLES::SetRenderingDefaults()
 {
 	eglSwapInterval(mDisplay,1);
+	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
+
 	glViewport(0, 0, (GLsizei)mWidth, (GLsizei)mHeight);
 	glDepthRangef(0.0f,1.0f);
 	glPixelStorei(GL_UNPACK_ALIGNMENT,1);
 	SetFrustum2D();
-
-	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
 
 	glDisable(GL_DEPTH_TEST);
 	glDepthFunc(GL_ALWAYS);
@@ -1298,7 +1373,6 @@ bool GLES::mCTRL_C_Pressed = false;
 void GLES::CtrlHandler(int SigNum)
 {
 	static int numTimesAskedToExit = 0;
-
 	// Propergate to someone elses handler, if they felt they wanted to add one too.
 	if( mUsersSignalAction != NULL )
 	{
@@ -1322,10 +1396,12 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 	mName(pName),
 	mVerbose(pVerbose)
 {
+	VERBOSE_MESSAGE("GLShader::Create: " << mName);
+
 	const int vertexShader = LoadShader(GL_VERTEX_SHADER,pVertex);
 	const int fragmentShader = LoadShader(GL_FRAGMENT_SHADER,pFragment);
 
-	VERBOSE_MESSAGE("GLShader::Create: " << mName << " :vertexShader("<<vertexShader<<") fragmentShader("<<fragmentShader<<")");
+	VERBOSE_MESSAGE("vertexShader("<<vertexShader<<") fragmentShader("<<fragmentShader<<")");
 
 	mShader = glCreateProgram(); // create empty OpenGL Program
 	CHECK_OGL_ERRORS();
@@ -1380,7 +1456,9 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 
 GLShader::~GLShader()
 {
-	glDeleteShader ( mShader );
+	VERBOSE_MESSAGE("Deleting shader " << mName << " " << mShader);
+	glDeleteShader(mShader);
+	CHECK_OGL_ERRORS();
 	mShader = 0;
 }
 
@@ -1413,8 +1491,6 @@ void GLShader::Enable(const Matrix4x4& projInvcam)
 	assert(mShader);
     glUseProgram(mShader);
     CHECK_OGL_ERRORS();
-
-	float ident[16]={1,0,0,0,    0,1,0,0,    0,0,1,0,    0,0,0,1};
 
     glUniformMatrix4fv(mUniforms.proj_cam, 1, false,(const float*)projInvcam.m);
     CHECK_OGL_ERRORS();
@@ -1792,6 +1868,217 @@ void FreeTypeFont::BuildTexture(
 }
 
 #endif //#ifdef USE_FREETYPEFONTS
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// PLATFORM_X11_GL Implementation.
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+#ifdef PLATFORM_X11_GL
+/**
+ * @brief The TinyGLES codebase is expected to be used for a system not running X11. But to aid development there is an option to 'emulate' a frame buffer with an X11 window.
+ */
+X11GLEmulation::X11GLEmulation(bool pVerbose):
+	mVerbose(pVerbose),
+	mDisplay(NULL),
+	mWindow(0),
+	mWindowReady(false)
+{
+	// Before we do anything do this. So we can run message pump on it's own thread.
+	XInitThreads();
+
+	mDisplay = XOpenDisplay(NULL);
+	if( mDisplay == NULL )
+	{
+		throw std::runtime_error("Failed to open X display");
+	}
+
+	int glx_major, glx_minor;
+
+	// FBConfigs were added in GLX version 1.3.
+	if( glXQueryVersion(mDisplay, &glx_major, &glx_minor) == GL_FALSE )
+	{
+		throw std::runtime_error("Failed to fetch glx version information");
+	}
+	VERBOSE_MESSAGE("GLX version " << glx_major << "." << glx_minor);
+
+	static int visual_attribs[] =
+	{
+		GLX_X_RENDERABLE    , True,
+		GLX_DRAWABLE_TYPE   , GLX_WINDOW_BIT,
+		GLX_RENDER_TYPE     , GLX_RGBA_BIT,
+		GLX_X_VISUAL_TYPE   , GLX_TRUE_COLOR,
+		GLX_RED_SIZE        , 8,
+		GLX_GREEN_SIZE      , 8,
+		GLX_BLUE_SIZE       , 8,
+		GLX_ALPHA_SIZE      , 8,
+		GLX_DEPTH_SIZE      , 24,
+		GLX_STENCIL_SIZE    , 8,
+		GLX_DOUBLEBUFFER    , True,
+		//GLX_SAMPLE_BUFFERS  , 1,
+		//GLX_SAMPLES         , 4,
+		None
+	};
+
+	int numConfigs;
+	GLXFBConfig* fbc = glXChooseFBConfig(mDisplay, DefaultScreen(mDisplay), visual_attribs, &numConfigs);
+	if( fbc == nullptr )
+	{
+		throw std::runtime_error("Failed to retrieve a framebuffer config");
+	}
+
+	VERBOSE_MESSAGE("Found " << numConfigs << " matching FB configs, picking first one");
+	const GLXFBConfig& bestFbc = fbc[0];
+
+	XVisualInfo *vi = glXGetVisualFromFBConfig( mDisplay, bestFbc );
+	VERBOSE_MESSAGE("Chosen visual ID = " << vi->visualid );
+
+	VERBOSE_MESSAGE("Creating colormap");
+	XSetWindowAttributes swa;
+	Colormap cmap;
+	swa.colormap = cmap = XCreateColormap(mDisplay,RootWindow(mDisplay,0),vi->visual, AllocNone );
+	swa.background_pixmap = None ;
+	swa.border_pixel      = 0;
+	swa.event_mask        = ExposureMask | KeyPressMask | StructureNotifyMask | PointerMotionMask | ButtonPressMask | ButtonReleaseMask ;
+
+	mWindow = XCreateWindow(
+					mDisplay,
+					RootWindow(mDisplay, vi->screen),
+					10, 10,
+					X11_EMULATION_WIDTH, X11_EMULATION_HEIGHT,
+					0, vi->depth, InputOutput, vi->visual,
+					CWBorderPixel|CWColormap|CWEventMask,
+					&swa );
+	if( !mWindow )
+	{
+		throw std::runtime_error("Falid to create XWindow for our GL application");
+	}
+
+ // Done with the visual info data
+	XFree( vi );
+	XStoreName(mDisplay, mWindow, "Tiny GLES");
+	XMapWindow(mDisplay, mWindow);
+/*
+	int context_attribs[] =
+	{
+		GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
+		GLX_CONTEXT_MINOR_VERSION_ARB, 0,
+		//GLX_CONTEXT_FLAGS_ARB        , GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
+		None
+	};
+
+    VERBOSE_MESSAGE("Creating context");
+    mGLXContext = glXCreateContextAttribsARB( mDisplay, bestFbc, 0,True, context_attribs );*/
+
+	mGLXContext = glXCreateNewContext( mDisplay, bestFbc, GLX_RGBA_TYPE, 0, True );
+	XSync(mDisplay,False);
+
+	VERBOSE_MESSAGE("Making context current");
+	glXMakeCurrent(mDisplay,mWindow,mGLXContext);
+
+	// So I can exit cleanly if the user uses the close window button.
+	mDeleteMessage = XInternAtom(mDisplay, "WM_DELETE_WINDOW", False);
+	XSetWMProtocols(mDisplay, mWindow, &mDeleteMessage, 1);
+
+	// wait for the expose message.
+  	timespec SleepTime = {0,1000000};
+	while( !mWindowReady )
+	{
+		ProcessX11Events(nullptr);
+		nanosleep(&SleepTime,NULL);
+	}
+}
+
+X11GLEmulation::~X11GLEmulation()
+{
+	VERBOSE_MESSAGE("Cleaning up GL");
+	mWindowReady = false;
+
+	glXMakeCurrent(mDisplay, 0, 0 );
+	glXDestroyContext(mDisplay,mGLXContext);
+
+	// Do this after we have set the message pump flag to false so the events generated will case XNextEvent to return.
+	XDestroyWindow(mDisplay,mWindow);
+	XCloseDisplay(mDisplay);
+}
+
+bool X11GLEmulation::ProcessX11Events(tinygles::GLES::SystemEventHandler pEventHandler)
+{
+	// The message pump had to be moved to the same thread as the rendering because otherwise it would fail after a little bit of time.
+	// This is dispite what the documentation stated.
+	while( XPending(mDisplay) )
+	{
+		XEvent e;
+		XNextEvent(mDisplay,&e);
+		switch( e.type )
+		{
+		case Expose:
+			mWindowReady = true;
+			break;
+
+		case ClientMessage:
+			// All of this is to stop and error when we try to use the display but has been disconnected.
+			// Snip from X11 docs.
+			// 	Clients that choose not to include WM_DELETE_WINDOW in the WM_PROTOCOLS property
+			// 	may be disconnected from the server if the user asks for one of the
+			//  client's top-level windows to be deleted.
+			// 
+			// My note, could have been avoided if we just had something like XDisplayStillValid(my display)
+			if (static_cast<Atom>(e.xclient.data.l[0]) == mDeleteMessage)
+			{
+				mWindowReady = false;
+				return true;
+			}
+			break;
+
+		case KeyPress:
+			// exit on ESC key press
+			if ( e.xkey.keycode == 0x09 )
+			{
+				mWindowReady = false;
+				return true;
+			}
+			break;
+
+		case MotionNotify:// Mouse movement
+			if( pEventHandler )
+			{
+				SystemEventData data(SystemEventType::POINTER_MOVE);
+				data.mPointer.X = e.xmotion.x;
+				data.mPointer.Y = e.xmotion.y;
+				pEventHandler(data);
+			}
+			break;
+
+		case ButtonPress:
+			if( pEventHandler )
+			{
+				SystemEventData data(SystemEventType::POINTER_DOWN);
+				data.mPointer.X = e.xbutton.x;
+				data.mPointer.Y = e.xbutton.y;
+				pEventHandler(data);
+			}
+			break;
+
+		case ButtonRelease:
+			if( pEventHandler )
+			{
+				SystemEventData data(SystemEventType::POINTER_UP);
+				data.mPointer.X = e.xbutton.x;
+				data.mPointer.Y = e.xbutton.y;
+				pEventHandler(data);
+			}
+			break;
+		}
+	}
+	return false;
+}
+
+void X11GLEmulation::RedrawWindow()
+{
+	assert( mWindowReady );
+	glXSwapBuffers(mDisplay,mWindow);
+}
+
+#endif //#ifdef PLATFORM_X11_GL
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Pixel Font bits, packed image. Used to create a texture

@@ -4,7 +4,7 @@
 #include <iostream>
 #include <assert.h>
 
-static uint32_t LoadTexture(tinygles::GLES &GL,const char* pFilename)
+static uint32_t LoadTexture(tinygles::GLES *GL,const char* pFilename)
 {
         // Load in a test texture
     uint32_t textureHandle = 0;
@@ -15,13 +15,13 @@ static uint32_t LoadTexture(tinygles::GLES &GL,const char* pFilename)
         {
             std::vector<uint8_t> RGBA;
             png.GetRGBA(RGBA);
-            textureHandle = GL.CreateTexture(png.GetWidth(),png.GetHeight(),RGBA.data(),tinygles::TextureFormat::FORMAT_RGBA);
+            textureHandle = GL->CreateTexture(png.GetWidth(),png.GetHeight(),RGBA.data(),tinygles::TextureFormat::FORMAT_RGBA);
         }
         else
         {
             std::vector<uint8_t> RGB;
             png.GetRGB(RGB);
-            textureHandle = GL.CreateTexture(png.GetWidth(),png.GetHeight(),RGB.data(),tinygles::TextureFormat::FORMAT_RGB);
+            textureHandle = GL->CreateTexture(png.GetWidth(),png.GetHeight(),RGB.data(),tinygles::TextureFormat::FORMAT_RGB);
         }
     }
     assert(textureHandle);
@@ -36,10 +36,10 @@ struct ABall
     int vx = 1 + (rand()%10);
     int vy = 1 + (rand()%10);
 
-    void Update(tinygles::GLES &GL,uint32_t ballTexture)
+    void Update(tinygles::GLES *GL,uint32_t ballTexture)
     {
         ballx += vx;
-        if( ballx > GL.GetWidth()-64)
+        if( ballx > GL->GetWidth()-64)
         {
             vx = -(1+(rand()%7));
         }
@@ -49,7 +49,7 @@ struct ABall
         }
 
         bally += vy;
-        if( bally > GL.GetHeight()-64 )
+        if( bally > GL->GetHeight()-64 )
         {
             vy = -(1+(rand()%7));
         }
@@ -58,7 +58,7 @@ struct ABall
             vy = (1+(rand()%7));
         }
 
-        GL.FillRectangle(ballx,bally,ballx+64,bally+64,ballTexture);
+        GL->FillRectangle(ballx,bally,ballx+64,bally+64,ballTexture);
     }
 };
 
@@ -73,7 +73,7 @@ int main(int argc, char *argv[])
     std::cout << "Build date " << APP_BUILD_DATE << '\n';
     std::cout << "Build time " << APP_BUILD_TIME << '\n';
 
-    tinygles::GLES GL(true);
+    tinygles::GLES* GL = new tinygles::GLES(true);
 
     // Load in a test texture
     uint32_t create = LoadTexture(GL,"crate.png");
@@ -86,30 +86,32 @@ int main(int argc, char *argv[])
 
     int anim = 0;
     std::cout << "Starting render loop\n";
-    while( GL.BeginFrame() )
+    while( GL->BeginFrame() )
     {
         anim++;
 
-        GL.FillRectangle(0,0,GL.GetWidth(),GL.GetHeight(),GL.GetDiagnosticsTexture());
+        GL->FillRectangle(0,0,GL->GetWidth(),GL->GetHeight(),GL->GetDiagnosticsTexture());
 
-        GL.FillRoundedRectangle(50,50,950,550,100,55,20,155);
-        GL.DrawRoundedRectangle(50,50,950,550,100,255,255,255);
+        GL->FillRoundedRectangle(50,50,950,550,100,55,20,155);
+        GL->DrawRoundedRectangle(50,50,950,550,100,255,255,255);
     
         for( auto& b : balls )
         {
             b.Update(GL,ball);
         }
 
-        GL.FillRectangle(100,100,200,200,create);
-        GL.FillRectangle(300,100,400,200,plant);
+        GL->FillRectangle(100,100,200,200,create);
+        GL->FillRectangle(300,100,400,200,plant);
 
-        GL.FillRectangle(100,300,300,500,debug1);
-        GL.FillRectangle(400,300,600,500,debug2);
+        GL->FillRectangle(100,300,300,500,debug1);
+        GL->FillRectangle(400,300,600,500,debug2);
 
-
-        GL.EndFrame();
-
+        GL->EndFrame();
     }
+
+    delete GL;
+
+    std::cout << "Exit...";
 
     return EXIT_SUCCESS;
 }
