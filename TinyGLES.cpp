@@ -712,29 +712,34 @@ void GLES::FontPrint(int pX,int pY,const char* pText)
 {
 	const std::string_view s(pText);
 	mWorkBuffers.vec2Ds.Reset();
+	mWorkBuffers.uvShort.Reset();
 
 	// Get where the uvs will be written too.
-	const Vec2Ds* verts = mWorkBuffers.vec2Ds.end();
 	const int quadSize = 16 * mPixelFont.scale;
 	const int squishHack = 3 * mPixelFont.scale;
 	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,s.size(),quadSize - squishHack,0);
+	const Vec2Ds* verts = mWorkBuffers.vec2Ds.data();
+
 	// how many?
 	const int numVerts = mWorkBuffers.vec2Ds.size();
 
 	// Get where the uvs will be written too.
 	const int maxUV = 32767;
 	const int charSize = maxUV / 16;
-	const Vec2Ds* uvs = mWorkBuffers.vec2Ds.end();
 	for( auto c : s )
 	{
 		const int x = ((int)c&0x0f) * charSize;
 		const int y = ((int)c>>4) * charSize;
-		mWorkBuffers.vec2Ds.BuildQuad(x+64,y+64,charSize-128,charSize-128);// The +- 64 is because of filtering. Makes font look nice at normal size.
+		mWorkBuffers.uvShort.BuildQuad(x+64,y+64,charSize-128,charSize-128);// The +- 64 is because of filtering. Makes font look nice at normal size.
 	}
+	const Vec2Ds* uvs = mWorkBuffers.uvShort.data();
 
 	// Continue adding uvs to the buffer after the verts.
-	assert(mPixelFont.texture);
+
 	EnableShader(mShaders.TextureAlphaOnly,mPixelFont.texture,mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
+
+	assert(verts);
+	assert(uvs);
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TEXCOORD,
@@ -742,8 +747,10 @@ void GLES::FontPrint(int pX,int pY,const char* pText)
 				GL_SHORT,
 				GL_TRUE,
 				4,uvs);
+	CHECK_OGL_ERRORS();
 
 	VertexPtr(2,GL_SHORT,4,verts);
+	CHECK_OGL_ERRORS();
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
 	CHECK_OGL_ERRORS();
 }
@@ -813,23 +820,26 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 //	FillRectangle(10,10,510,510,font->mTexture);
 
 	mWorkBuffers.vec2Ds.Reset();
+	mWorkBuffers.uvShort.Reset();
+	
 
 	// Get where the uvs will be written too.
-	const Vec2Ds* verts = mWorkBuffers.vec2Ds.end();
 	const int quadSize = 16 * mPixelFont.scale;
 	const int squishHack = 3 * mPixelFont.scale;
 	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,pText.size(),quadSize - squishHack,0);
+	
+	const Vec2Ds* verts = mWorkBuffers.vec2Ds.data();
+
 	// how many?
 	const int numVerts = mWorkBuffers.vec2Ds.size();
 
 	// Get where the uvs will be written too.
-	const Vec2Ds* uvs = mWorkBuffers.vec2Ds.end();
 	for( auto c : pText )
 	{
 		if( c > 31 || c < 127 )
 		{
 			auto&g = font->mGlyphs.at(c-32);
-			mWorkBuffers.vec2Ds.AddUVRect(
+			mWorkBuffers.uvShort.AddUVRect(
 					g.uv[0].x,
 					g.uv[0].y,
 					g.uv[1].x,
@@ -842,6 +852,7 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 			pX += font->mGlyphs[0].advance;
 		}
 	}
+	const Vec2Ds* uvs = mWorkBuffers.uvShort.data();
 
 	assert(font->mTexture);
 	EnableShader(mShaders.TextureAlphaOnly,font->mTexture,font->mColour.R,font->mColour.G,font->mColour.B,font->mColour.A);
@@ -1378,7 +1389,7 @@ void GLES::CtrlHandler(int SigNum)
 	// Propergate to someone elses handler, if they felt they wanted to add one too.
 	if( mUsersSignalAction != NULL )
 	{
-//		mUsersSignalAction(SigNum);
+		mUsersSignalAction(SigNum);
 	}
 
 	if( numTimesAskedToExit > 2 )
@@ -1728,16 +1739,16 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 	// bbox.yMax is the height of a bounding box that will enclose
 	//  any glyph in the face, starting from the glyph baseline.
 	// Code changed, was casing it to render in the Y center of the font not on the base line. Will add it as an option in the future. Richard.
-	int bbox_ymax = 0;//mFace->bbox.yMax / 64;
+//	int bbox_ymax = 0;//mFace->bbox.yMax / 64;
 
 	// horiBearingX is the height of the top of the glyph from
 	//   the baseline. So we work out the y offset -- the distance
 	//   we must push down the glyph from the top of the bounding
 	//   box -- from the height and the Y bearing.
-	int y_off = bbox_ymax - mFace->glyph->metrics.horiBearingY / 64;
+//	int y_off = bbox_ymax - mFace->glyph->metrics.horiBearingY / 64;
 
 	// glyph_width is the pixel width of this specific glyph
-	int glyph_width = mFace->glyph->metrics.width / 64;
+//	int glyph_width = mFace->glyph->metrics.width / 64;
 
 
 	// So now we have (x_off,y_off), the location at which to
@@ -1762,13 +1773,13 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 	}
 
 	assert(mFace->glyph->bitmap.buffer);
-
-	if( mFace->glyph->bitmap.pitch == mFace->glyph->bitmap.width )
+/*
+	if( mFace->glyph->bitmap.pitch == (int)mFace->glyph->bitmap.width )
 	{// Quick path. Normally taken.
 		rPixels.resize(expectedSize);
 		memcpy(rPixels.data(),mFace->glyph->bitmap.buffer,expectedSize);
 	}
-	else
+	else*/
 	{
 		rPixels.reserve(expectedSize);
 		const uint8_t* src = mFace->glyph->bitmap.buffer;

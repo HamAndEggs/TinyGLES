@@ -196,7 +196,6 @@ template<typename _VertexType> struct VertexBuffer
 
 	const size_t size()const{return mVerts.size();}
 	const _VertexType* data()const{return mVerts.data();}
-	const _VertexType* end()const{return mVerts.data() + mVerts.size();}
 
 private:
 	std::vector<_VertexType> mVerts;
@@ -499,6 +498,7 @@ private:
 	{
 		std::array<Vec2Df,128> vec2Df;
 		VertexBuffer<Vec2Ds> vec2Ds;
+		VertexBuffer<Vec2Ds> uvShort;
 		std::vector<uint8_t> zeroPixels; // Used to initialise a texture when user does not yet have all the pixels data. Please read comment in CreateTexture.
 	}mWorkBuffers;
 
