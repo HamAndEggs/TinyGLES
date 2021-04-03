@@ -178,7 +178,9 @@ struct GLShader
 
 	const std::string mName;	//!< Mainly to help debugging.
 	const bool mVerbose;
-	GLint mShader;
+	GLint mShader = 0;
+	GLint mVertexShader = 0;
+	GLint mFragmentShader = 0;
 	struct
 	{
 		GLint trans;
@@ -1376,7 +1378,7 @@ void GLES::CtrlHandler(int SigNum)
 	// Propergate to someone elses handler, if they felt they wanted to add one too.
 	if( mUsersSignalAction != NULL )
 	{
-		mUsersSignalAction(SigNum);
+//		mUsersSignalAction(SigNum);
 	}
 
 	if( numTimesAskedToExit > 2 )
@@ -1386,7 +1388,6 @@ void GLES::CtrlHandler(int SigNum)
 	}
 
 	mCTRL_C_Pressed = true;
-	std::cout << '\n'; // without this the command prompt may be at the end of the ^C char.
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1398,18 +1399,18 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 {
 	VERBOSE_MESSAGE("GLShader::Create: " << mName);
 
-	const int vertexShader = LoadShader(GL_VERTEX_SHADER,pVertex);
-	const int fragmentShader = LoadShader(GL_FRAGMENT_SHADER,pFragment);
+	mVertexShader = LoadShader(GL_VERTEX_SHADER,pVertex);
+	mFragmentShader = LoadShader(GL_FRAGMENT_SHADER,pFragment);
 
-	VERBOSE_MESSAGE("vertexShader("<<vertexShader<<") fragmentShader("<<fragmentShader<<")");
+	VERBOSE_MESSAGE("vertex("<<mVertexShader<<") fragment("<<mFragmentShader<<")");
 
 	mShader = glCreateProgram(); // create empty OpenGL Program
 	CHECK_OGL_ERRORS();
 
-	glAttachShader(mShader, vertexShader); // add the vertex shader to program
+	glAttachShader(mShader, mVertexShader); // add the vertex shader to program
 	CHECK_OGL_ERRORS();
 
-	glAttachShader(mShader, fragmentShader); // add the fragment shader to program
+	glAttachShader(mShader, mFragmentShader); // add the fragment shader to program
 	CHECK_OGL_ERRORS();
 	//Set the input stream numbers.
 	//Has to be done before linking.
@@ -1452,12 +1453,22 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 	mUniforms.trans = GetUniformLocation("u_trans");
 	mUniforms.global_colour = GetUniformLocation("u_global_colour");
 	mUniforms.tex0 = GetUniformLocation("u_tex0");
+
+
+	glUseProgram(0);
 }
 
 GLShader::~GLShader()
 {
 	VERBOSE_MESSAGE("Deleting shader " << mName << " " << mShader);
-	glDeleteShader(mShader);
+	
+	glDeleteShader(mVertexShader);
+	CHECK_OGL_ERRORS();
+
+	glDeleteShader(mFragmentShader);
+	CHECK_OGL_ERRORS();
+
+	glDeleteProgram(mShader);
 	CHECK_OGL_ERRORS();
 	mShader = 0;
 }

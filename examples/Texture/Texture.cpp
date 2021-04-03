@@ -111,7 +111,7 @@ int main(int argc, char *argv[])
 
     delete GL;
 
-    std::cout << "Exit...";
+    std::cout << "Exit...\n";
 
     return EXIT_SUCCESS;
 }
