@@ -60,7 +60,7 @@
 	/**
 	 * @brief Emulate GLES with GL and X11, some defines to make the implementation cleaner, this is for development, I hate it adds loads of #ifdef's this should stop that.
 	 */
-	#define eglSwapBuffers(DISPLAY__,SURFACE__)			(mNativeWindow->RedrawWindow())
+	#define eglSwapBuffers(DISPLAY__,SURFACE__)			{if(mNativeWindow){mNativeWindow->RedrawWindow();}}
 	#define eglDestroyContext(DISPLAY__, CONTEXT__)
 	#define eglDestroySurface(DISPLAY__, SURFACE__)
 	#define eglTerminate(DISPLAY__)
@@ -259,6 +259,8 @@ private:
 			const size_t newCount = mCount + pExtraSpaceNeeded + GROWN_TYPE_COUNT;
 			SCRATCH_MEMORY_TYPE* newMemory = new SCRATCH_MEMORY_TYPE[newCount];
 			std::memmove(newMemory,mMemory,mCount);
+			delete []mMemory;
+			mMemory = newMemory;
 			mCount = newCount;
 		}
 	}

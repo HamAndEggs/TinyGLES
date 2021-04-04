@@ -43,7 +43,6 @@ int main(int argc, char *argv[])
         GL.FontPrint(FTFont,300,300,"BLUE");
 
         GL.EndFrame();
-
     }
 
 // And quit

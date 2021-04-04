@@ -56,6 +56,7 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 
 #define VERBOSE_MESSAGE(THE_MESSAGE__)	{if(mVerbose){std::clog << THE_MESSAGE__ << "\n";}}
 
+#define THROW_MEANINGFUL_EXCEPTION(THE_MESSAGE__)	{throw std::runtime_error("At: " + std::to_string(__LINE__) + " In " + std::string(__FILE__) + " : " + std::string(THE_MESSAGE__));}
 
 struct Quad3D
 {
@@ -206,7 +207,7 @@ struct GLShader
 struct X11GLEmulation
 {
 	const bool mVerbose;
-	Display *mDisplay = nullptr;
+	Display *mXDisplay = nullptr;
 	Window mWindow = 0;
 	Atom mDeleteMessage;
 	GLXContext mGLXContext = 0;
@@ -314,11 +315,6 @@ GLES::~GLES()
 	}
 
 	VERBOSE_MESSAGE("Clearing display");
-//	Clear(0,0,0);
-//	eglSwapBuffers(mDisplay,mSurface);
-//	glFlush();
-//	glFinish();
-//	CHECK_OGL_ERRORS();
 
 	VERBOSE_MESSAGE("Destroying contect");
 	eglDestroyContext(mDisplay, mContext);
@@ -542,7 +538,7 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,Textu
 	const GLint format = TextureFormatToGLFormat(pFormat);
 	if( format == GL_INVALID_ENUM )
 	{
-		throw std::runtime_error("CreateTexture passed an unknown texture format, I can not continue.");
+		THROW_MEANINGFUL_EXCEPTION("CreateTexture passed an unknown texture format, I can not continue.");
 	}
 
 	GLTexture tex;
@@ -554,12 +550,12 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,Textu
 	CHECK_OGL_ERRORS();
 	if( tex.mHandle == 0 )
 	{
-		throw std::runtime_error("Failed to create texture, glGenTextures returned zero");
+		THROW_MEANINGFUL_EXCEPTION("Failed to create texture, glGenTextures returned zero");
 	}
 
 	if( mTextures.find(tex.mHandle) != mTextures.end() )
 	{
-		throw std::runtime_error("Bug found in GLES code, glGenTextures returned an index that we already know about.");
+		THROW_MEANINGFUL_EXCEPTION("Bug found in GLES code, glGenTextures returned an index that we already know about.");
 	}
 	mTextures[tex.mHandle] = tex;
 
@@ -645,7 +641,7 @@ void GLES::FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,co
 	const GLint format = TextureFormatToGLFormat(pFormat);
 	if( format == GL_INVALID_ENUM )
 	{
-		throw std::runtime_error("FillTexture passed an unknown texture format, I can not continue.");
+		THROW_MEANINGFUL_EXCEPTION("FillTexture passed an unknown texture format, I can not continue.");
 	}
 
 	glTexSubImage2D(GL_TEXTURE_2D,
@@ -672,12 +668,12 @@ void GLES::DeleteTexture(uint32_t pTexture)
 {
 	if( pTexture == mDiagnostics.texture )
 	{
-		throw std::runtime_error("An attempt was made to delete the debug texture, do not do this!");
+		THROW_MEANINGFUL_EXCEPTION("An attempt was made to delete the debug texture, do not do this!");
 	}
 
 	if( pTexture == mPixelFont.texture )
 	{
-		throw std::runtime_error("An attempt was made to delete the pixel font texture, do not do this!");
+		THROW_MEANINGFUL_EXCEPTION("An attempt was made to delete the pixel font texture, do not do this!");
 	}
 	
 
@@ -754,7 +750,7 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 	FT_Face loadedFace;
 	if( FT_New_Face(mFreetype,pFontName.c_str(),0,&loadedFace) != 0 )
 	{
-		throw std::runtime_error("Failed to load true type font " + pFontName);
+		THROW_MEANINGFUL_EXCEPTION("Failed to load true type font " + pFontName);
 	}
 
 	const uint32_t fontID = mNextFontID++;
@@ -765,7 +761,12 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 	font->BuildTexture(
 		[this](int pWidth,int pHeight)
 		{
-			return CreateTexture(pWidth,pHeight,nullptr,TextureFormat::FORMAT_ALPHA);
+			// Because the glyph rending to texture does not fill the whole texture the GL texture will not be created.
+			// Do I have to make a big memory buffer, fill it with zero, then free the memory.
+			auto zeroMemory = std::make_unique<uint8_t[]>(pWidth * pHeight);
+			memset(zeroMemory.get(),0,pWidth * pHeight);
+
+			return CreateTexture(pWidth,pHeight,zeroMemory.get(),TextureFormat::FORMAT_ALPHA);			
 		},
 		[this](uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels)
 		{
@@ -929,7 +930,7 @@ void GLES::FetchDisplayMode()
 		int File = open("/dev/fb0", O_RDWR);
 		if(ioctl(File, FBIOGET_VSCREENINFO, &vinfo) ) 
 		{
-			throw std::runtime_error("failed to open ioctl");
+			THROW_MEANINGFUL_EXCEPTION("failed to open ioctl");
 		}
 		close(File);
 	}
@@ -939,7 +940,7 @@ void GLES::FetchDisplayMode()
 
 	if( mWidth < 16 || mHeight < 16 )
 	{
-		throw std::runtime_error("failed to find sensible screen mode from /dev/fb0");
+		THROW_MEANINGFUL_EXCEPTION("failed to find sensible screen mode from /dev/fb0");
 	}
 #endif
 
@@ -962,13 +963,13 @@ void GLES::InitialiseDisplay()
 	mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 	if( !mDisplay )
 	{
-		throw std::runtime_error("Couldn\'t open the EGL default display");
+		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
 	}
 
 	//Now we have a display lets initialize it.
 	if( !eglInitialize(mDisplay, &mMajorVersion, &mMinorVersion) )
 	{
-		throw std::runtime_error("eglInitialize() failed");
+		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
 	}
 	CHECK_OGL_ERRORS();
 	VERBOSE_MESSAGE("GLES version " << mMajorVersion << "." << mMinorVersion);
@@ -1004,7 +1005,7 @@ void GLES::FindGLESConfiguration()
 		EGLint numConfigs;
 		if( !eglChooseConfig(mDisplay,attrib_list,&mConfig,1, &numConfigs) )
 		{
-			throw std::runtime_error("Error: eglGetConfigs() failed");
+			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
 		}
 
 		if( numConfigs > 0 )
@@ -1031,7 +1032,7 @@ void GLES::FindGLESConfiguration()
 			return;// All good :)
 		}
 	}
-	throw std::runtime_error("No matching EGL configs found");
+	THROW_MEANINGFUL_EXCEPTION("No matching EGL configs found");
 #endif //#ifdef PLATFORM_GLES
 }
 
@@ -1044,7 +1045,7 @@ void GLES::CreateRenderingContext()
 	mContext = eglCreateContext(mDisplay,mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
 	if( !mContext )
 	{
-		throw std::runtime_error("Failed to get a rendering context");
+		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
 	}
 
 // This is annoying but GLES is just broken on RPi and always has been.
@@ -1301,7 +1302,7 @@ void GLES::InitFreeTypeFont()
 	}
 	else
 	{
-		throw std::runtime_error("Failed to init free type font library");
+		THROW_MEANINGFUL_EXCEPTION("Failed to init free type font library");
 	}
 #endif
 }
@@ -1310,7 +1311,7 @@ void GLES::VertexPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void*
 {
 	if(pNum_coord < 2 || pNum_coord > 3)
 	{
-		throw std::runtime_error("VertexPtr passed invalid value for pNum_coord, must be 2 or 3 got " + std::to_string(pNum_coord));
+		THROW_MEANINGFUL_EXCEPTION("VertexPtr passed invalid value for pNum_coord, must be 2 or 3 got " + std::to_string(pNum_coord));
 	}
 
 	return SetUserSpaceStreamPtr(StreamIndex::VERTEX,pNum_coord,pType,pStride,pPointer);
@@ -1325,7 +1326,7 @@ void GLES::ColourPtr(GLint pNum_coord, GLsizei pStride,const uint8_t* pPointer)
 {
 	if(pNum_coord < 3 || pNum_coord > 4)
 	{
-		throw std::runtime_error("ColourPtr passed invalid value for pNum_coord, must be 3 or 4 got " + std::to_string(pNum_coord));
+		THROW_MEANINGFUL_EXCEPTION("ColourPtr passed invalid value for pNum_coord, must be 3 or 4 got " + std::to_string(pNum_coord));
 	}
 
 	return SetUserSpaceStreamPtr(StreamIndex::COLOUR,pNum_coord,GL_BYTE,pStride,pPointer);
@@ -1335,12 +1336,12 @@ void GLES::SetUserSpaceStreamPtr(StreamIndex pStream,GLint pNum_coord, GLenum pT
 {
 	if( pStride == 0 )
 	{
-		throw std::runtime_error("SetUserSpaceStreamPtr passed invalid value for pStride, must be > 0 ");
+		THROW_MEANINGFUL_EXCEPTION("SetUserSpaceStreamPtr passed invalid value for pStride, must be > 0 ");
 	}
 
 	if( pStream != StreamIndex::VERTEX && pStream != StreamIndex::TEXCOORD && pStream != StreamIndex::COLOUR  )
 	{
-		throw std::runtime_error("SetUserSpaceStreamPtr passed invlaid stream index " + std::to_string((int)pStream));
+		THROW_MEANINGFUL_EXCEPTION("SetUserSpaceStreamPtr passed invlaid stream index " + std::to_string((int)pStream));
 	}
 
 	glVertexAttribPointer(
@@ -1428,7 +1429,7 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 		}
 		glDeleteShader ( mShader );
 		mShader = 0;
-		throw std::runtime_error(error);
+		THROW_MEANINGFUL_EXCEPTION(error);
 	}
 
 	VERBOSE_MESSAGE("Shader: " << mName << " Compiled ok");
@@ -1572,7 +1573,7 @@ int GLShader::LoadShader(int type, const char* shaderCode)
 			error += error_message;
 		}
 		glDeleteShader ( shaderFrag );
-		throw std::runtime_error(error);
+		THROW_MEANINGFUL_EXCEPTION(error);
 	}
 	CHECK_OGL_ERRORS();
 
@@ -1747,13 +1748,13 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 	}
 
 	assert(mFace->glyph->bitmap.buffer);
-/*
+
 	if( mFace->glyph->bitmap.pitch == (int)mFace->glyph->bitmap.width )
 	{// Quick path. Normally taken.
 		rPixels.resize(expectedSize);
 		memcpy(rPixels.data(),mFace->glyph->bitmap.buffer,expectedSize);
 	}
-	else*/
+	else
 	{
 		rPixels.reserve(expectedSize);
 		const uint8_t* src = mFace->glyph->bitmap.buffer;
@@ -1768,7 +1769,7 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 
 	if( expectedSize != rPixels.size() )
 	{
-		throw std::runtime_error("Font: " + mFontName + " Error, we read more pixels for free type font than expected for the glyph " + pChar );
+		THROW_MEANINGFUL_EXCEPTION("Font: " + mFontName + " Error, we read more pixels for free type font than expected for the glyph " + pChar );
 	}
 
 	return true;
@@ -1802,7 +1803,7 @@ void FreeTypeFont::BuildTexture(
 	VERBOSE_MESSAGE("Font max glyph size requirement for cache is " << maxX << " " << maxY);
 	if( maxX > 128 || maxY > 128 )
 	{
-		throw std::runtime_error("Font: " + mFontName + " requires a very large texture as it's maximun size glyph is very big. This creation has been halted. Please reduce size of font!");
+		THROW_MEANINGFUL_EXCEPTION("Font: " + mFontName + " requires a very large texture as it's maximun size glyph is very big. This creation has been halted. Please reduce size of font!");
 	}
 
 	auto nextPow2 = [](int v)
@@ -1874,25 +1875,26 @@ void FreeTypeFont::BuildTexture(
  */
 X11GLEmulation::X11GLEmulation(bool pVerbose):
 	mVerbose(pVerbose),
-	mDisplay(NULL),
+	mXDisplay(NULL),
 	mWindow(0),
 	mWindowReady(false)
 {
+	VERBOSE_MESSAGE("Making X11 window for GLES emulation");
 	// Before we do anything do this. So we can run message pump on it's own thread.
 	XInitThreads();
 
-	mDisplay = XOpenDisplay(NULL);
-	if( mDisplay == NULL )
+	mXDisplay = XOpenDisplay(NULL);
+	if( mXDisplay == nullptr )
 	{
-		throw std::runtime_error("Failed to open X display");
+		THROW_MEANINGFUL_EXCEPTION("Failed to open X display");
 	}
 
 	int glx_major, glx_minor;
 
 	// FBConfigs were added in GLX version 1.3.
-	if( glXQueryVersion(mDisplay, &glx_major, &glx_minor) == GL_FALSE )
+	if( glXQueryVersion(mXDisplay, &glx_major, &glx_minor) == GL_FALSE )
 	{
-		throw std::runtime_error("Failed to fetch glx version information");
+		THROW_MEANINGFUL_EXCEPTION("Failed to fetch glx version information");
 	}
 	VERBOSE_MESSAGE("GLX version " << glx_major << "." << glx_minor);
 
@@ -1915,29 +1917,29 @@ X11GLEmulation::X11GLEmulation(bool pVerbose):
 	};
 
 	int numConfigs;
-	GLXFBConfig* fbc = glXChooseFBConfig(mDisplay, DefaultScreen(mDisplay), visual_attribs, &numConfigs);
+	GLXFBConfig* fbc = glXChooseFBConfig(mXDisplay, DefaultScreen(mXDisplay), visual_attribs, &numConfigs);
 	if( fbc == nullptr )
 	{
-		throw std::runtime_error("Failed to retrieve a framebuffer config");
+		THROW_MEANINGFUL_EXCEPTION("Failed to retrieve a framebuffer config");
 	}
 
 	VERBOSE_MESSAGE("Found " << numConfigs << " matching FB configs, picking first one");
 	const GLXFBConfig& bestFbc = fbc[0];
 
-	XVisualInfo *vi = glXGetVisualFromFBConfig( mDisplay, bestFbc );
+	XVisualInfo *vi = glXGetVisualFromFBConfig( mXDisplay, bestFbc );
 	VERBOSE_MESSAGE("Chosen visual ID = " << vi->visualid );
 
 	VERBOSE_MESSAGE("Creating colormap");
 	XSetWindowAttributes swa;
 	Colormap cmap;
-	swa.colormap = cmap = XCreateColormap(mDisplay,RootWindow(mDisplay,0),vi->visual, AllocNone );
+	swa.colormap = cmap = XCreateColormap(mXDisplay,RootWindow(mXDisplay,0),vi->visual, AllocNone );
 	swa.background_pixmap = None ;
 	swa.border_pixel      = 0;
 	swa.event_mask        = ExposureMask | KeyPressMask | StructureNotifyMask | PointerMotionMask | ButtonPressMask | ButtonReleaseMask ;
 
 	mWindow = XCreateWindow(
-					mDisplay,
-					RootWindow(mDisplay, vi->screen),
+					mXDisplay,
+					RootWindow(mXDisplay, vi->screen),
 					10, 10,
 					X11_EMULATION_WIDTH, X11_EMULATION_HEIGHT,
 					0, vi->depth, InputOutput, vi->visual,
@@ -1945,34 +1947,23 @@ X11GLEmulation::X11GLEmulation(bool pVerbose):
 					&swa );
 	if( !mWindow )
 	{
-		throw std::runtime_error("Falid to create XWindow for our GL application");
+		THROW_MEANINGFUL_EXCEPTION("Falid to create XWindow for our GL application");
 	}
 
  // Done with the visual info data
 	XFree( vi );
-	XStoreName(mDisplay, mWindow, "Tiny GLES");
-	XMapWindow(mDisplay, mWindow);
-/*
-	int context_attribs[] =
-	{
-		GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
-		GLX_CONTEXT_MINOR_VERSION_ARB, 0,
-		//GLX_CONTEXT_FLAGS_ARB        , GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
-		None
-	};
+	XStoreName(mXDisplay, mWindow, "Tiny GLES");
+	XMapWindow(mXDisplay, mWindow);
 
-    VERBOSE_MESSAGE("Creating context");
-    mGLXContext = glXCreateContextAttribsARB( mDisplay, bestFbc, 0,True, context_attribs );*/
-
-	mGLXContext = glXCreateNewContext( mDisplay, bestFbc, GLX_RGBA_TYPE, 0, True );
-	XSync(mDisplay,False);
+	mGLXContext = glXCreateNewContext( mXDisplay, bestFbc, GLX_RGBA_TYPE, 0, True );
+	XSync(mXDisplay,False);
 
 	VERBOSE_MESSAGE("Making context current");
-	glXMakeCurrent(mDisplay,mWindow,mGLXContext);
+	glXMakeCurrent(mXDisplay,mWindow,mGLXContext);
 
 	// So I can exit cleanly if the user uses the close window button.
-	mDeleteMessage = XInternAtom(mDisplay, "WM_DELETE_WINDOW", False);
-	XSetWMProtocols(mDisplay, mWindow, &mDeleteMessage, 1);
+	mDeleteMessage = XInternAtom(mXDisplay, "WM_DELETE_WINDOW", False);
+	XSetWMProtocols(mXDisplay, mWindow, &mDeleteMessage, 1);
 
 	// wait for the expose message.
   	timespec SleepTime = {0,1000000};
@@ -1988,22 +1979,28 @@ X11GLEmulation::~X11GLEmulation()
 	VERBOSE_MESSAGE("Cleaning up GL");
 	mWindowReady = false;
 
-	glXMakeCurrent(mDisplay, 0, 0 );
-	glXDestroyContext(mDisplay,mGLXContext);
+	glXMakeCurrent(mXDisplay, 0, 0 );
+	glXDestroyContext(mXDisplay,mGLXContext);
 
 	// Do this after we have set the message pump flag to false so the events generated will case XNextEvent to return.
-	XDestroyWindow(mDisplay,mWindow);
-	XCloseDisplay(mDisplay);
+	XDestroyWindow(mXDisplay,mWindow);
+	XCloseDisplay(mXDisplay);
+	mXDisplay = nullptr;
 }
 
 bool X11GLEmulation::ProcessX11Events(tinygles::GLES::SystemEventHandler pEventHandler)
 {
 	// The message pump had to be moved to the same thread as the rendering because otherwise it would fail after a little bit of time.
 	// This is dispite what the documentation stated.
-	while( XPending(mDisplay) )
+	if( mXDisplay == nullptr )
+	{
+		THROW_MEANINGFUL_EXCEPTION("The X11 display object is NULL!");
+	}
+
+	while( XPending(mXDisplay) )
 	{
 		XEvent e;
-		XNextEvent(mDisplay,&e);
+		XNextEvent(mXDisplay,&e);
 		switch( e.type )
 		{
 		case Expose:
@@ -2071,7 +2068,11 @@ bool X11GLEmulation::ProcessX11Events(tinygles::GLES::SystemEventHandler pEventH
 void X11GLEmulation::RedrawWindow()
 {
 	assert( mWindowReady );
-	glXSwapBuffers(mDisplay,mWindow);
+	if( mXDisplay == nullptr )
+	{
+		THROW_MEANINGFUL_EXCEPTION("The X11 display object is NULL!");
+	}	
+	glXSwapBuffers(mXDisplay,mWindow);
 }
 
 #endif //#ifdef PLATFORM_X11_GL
