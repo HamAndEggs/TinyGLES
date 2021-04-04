@@ -119,6 +119,7 @@ struct FreeTypeFont
 		int height;
 		int pitch;
 		int advance;
+		int x_off,y_off;	//!< offset from current x and y that the quad is rendered.
 		struct
 		{// Where, in 16bit UV's, the glyph is.
 			int x,y;
@@ -211,6 +212,8 @@ struct X11GLEmulation
 	Window mWindow = 0;
 	Atom mDeleteMessage;
 	GLXContext mGLXContext = 0;
+	XSetWindowAttributes mWindowAttributes;
+	XVisualInfo* mVisualInfo;
 
 	bool mWindowReady;
 
@@ -320,10 +323,6 @@ GLES::~GLES()
 	eglDestroyContext(mDisplay, mContext);
     eglDestroySurface(mDisplay, mSurface);
     eglTerminate(mDisplay);
-
-#ifdef PLATFORM_X11_GL
-	delete mNativeWindow;
-#endif
 
 	VERBOSE_MESSAGE("All done");
 }
@@ -802,9 +801,9 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 	mWorkBuffers.uvShort.Restart();
 
 	// Get where the uvs will be written too.
-	const int quadSize = 16 * mPixelFont.scale;
-	const int squishHack = 3 * mPixelFont.scale;
-	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,pText.size(),quadSize - squishHack,0);
+//	const int quadSize = 16 * mPixelFont.scale;
+//	const int squishHack = 3 * mPixelFont.scale;
+//	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,pText.size(),quadSize - squishHack,0);
 
 	// Get where the uvs will be written too.
 	for( auto c : pText )
@@ -812,6 +811,9 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 		if( c > 31 || c < 127 )
 		{
 			auto&g = font->mGlyphs.at(c-32);
+
+			mWorkBuffers.vec2Ds.BuildQuad(pX + g.x_off,pY + g.y_off,g.width,g.height);
+
 			mWorkBuffers.uvShort.AddUVRect(
 					g.uv[0].x,
 					g.uv[0].y,
@@ -1714,17 +1716,10 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 	// bbox.yMax is the height of a bounding box that will enclose
 	//  any glyph in the face, starting from the glyph baseline.
 	// Code changed, was casing it to render in the Y center of the font not on the base line. Will add it as an option in the future. Richard.
-//	int bbox_ymax = 0;//mFace->bbox.yMax / 64;
-
-	// horiBearingX is the height of the top of the glyph from
-	//   the baseline. So we work out the y offset -- the distance
-	//   we must push down the glyph from the top of the bounding
-	//   box -- from the height and the Y bearing.
-//	int y_off = bbox_ymax - mFace->glyph->metrics.horiBearingY / 64;
+	int bbox_ymax = 0;//mFace->bbox.yMax / 64;
 
 	// glyph_width is the pixel width of this specific glyph
-//	int glyph_width = mFace->glyph->metrics.width / 64;
-
+	int glyph_width = mFace->glyph->metrics.width / 64;
 
 	// So now we have (x_off,y_off), the location at which to
 	//   start drawing the glyph bitmap.
@@ -1737,6 +1732,18 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 	// Advance is the amount of x spacing, in pixels, allocated
 	//   to this glyph
 	rGlyph.advance = mFace->glyph->metrics.horiAdvance / 64;
+
+
+	// horiBearingX is the height of the top of the glyph from
+	//   the baseline. So we work out the y offset -- the distance
+	//   we must push down the glyph from the top of the bounding
+	//   box -- from the height and the Y bearing.
+	rGlyph.y_off = bbox_ymax - mFace->glyph->metrics.horiBearingY / 64;
+
+	// Work out where to draw the left-most row of pixels --
+	//   the x offset -- by halving the space between the 
+	//   glyph width and the advance
+	rGlyph.x_off = (rGlyph.advance - glyph_width) / 2;
 
 	// It's an alpha only texture
 	const size_t expectedSize = mFace->glyph->bitmap.rows * mFace->glyph->bitmap.pitch;
@@ -1880,8 +1887,6 @@ X11GLEmulation::X11GLEmulation(bool pVerbose):
 	mWindowReady(false)
 {
 	VERBOSE_MESSAGE("Making X11 window for GLES emulation");
-	// Before we do anything do this. So we can run message pump on it's own thread.
-	XInitThreads();
 
 	mXDisplay = XOpenDisplay(NULL);
 	if( mXDisplay == nullptr )
@@ -1924,34 +1929,31 @@ X11GLEmulation::X11GLEmulation(bool pVerbose):
 	}
 
 	VERBOSE_MESSAGE("Found " << numConfigs << " matching FB configs, picking first one");
-	const GLXFBConfig& bestFbc = fbc[0];
+	const GLXFBConfig bestFbc = fbc[0];
+	XFree(fbc);
 
-	XVisualInfo *vi = glXGetVisualFromFBConfig( mXDisplay, bestFbc );
-	VERBOSE_MESSAGE("Chosen visual ID = " << vi->visualid );
+	mVisualInfo = glXGetVisualFromFBConfig( mXDisplay, bestFbc );
+	VERBOSE_MESSAGE("Chosen visual ID = " << mVisualInfo->visualid );
 
 	VERBOSE_MESSAGE("Creating colormap");
-	XSetWindowAttributes swa;
-	Colormap cmap;
-	swa.colormap = cmap = XCreateColormap(mXDisplay,RootWindow(mXDisplay,0),vi->visual, AllocNone );
-	swa.background_pixmap = None ;
-	swa.border_pixel      = 0;
-	swa.event_mask        = ExposureMask | KeyPressMask | StructureNotifyMask | PointerMotionMask | ButtonPressMask | ButtonReleaseMask ;
+	mWindowAttributes.colormap = XCreateColormap(mXDisplay,RootWindow(mXDisplay,0),mVisualInfo->visual, AllocNone );	;
+	mWindowAttributes.background_pixmap = None ;
+	mWindowAttributes.border_pixel      = 0;
+	mWindowAttributes.event_mask        = ExposureMask | KeyPressMask | StructureNotifyMask | PointerMotionMask | ButtonPressMask | ButtonReleaseMask ;
 
 	mWindow = XCreateWindow(
 					mXDisplay,
-					RootWindow(mXDisplay, vi->screen),
+					RootWindow(mXDisplay, mVisualInfo->screen),
 					10, 10,
 					X11_EMULATION_WIDTH, X11_EMULATION_HEIGHT,
-					0, vi->depth, InputOutput, vi->visual,
+					0, mVisualInfo->depth, InputOutput, mVisualInfo->visual,
 					CWBorderPixel|CWColormap|CWEventMask,
-					&swa );
+					&mWindowAttributes );
 	if( !mWindow )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Falid to create XWindow for our GL application");
 	}
 
- // Done with the visual info data
-	XFree( vi );
 	XStoreName(mXDisplay, mWindow, "Tiny GLES");
 	XMapWindow(mXDisplay, mWindow);
 
@@ -1983,6 +1985,8 @@ X11GLEmulation::~X11GLEmulation()
 	glXDestroyContext(mXDisplay,mGLXContext);
 
 	// Do this after we have set the message pump flag to false so the events generated will case XNextEvent to return.
+	XFree(mVisualInfo);
+	XFreeColormap(mXDisplay,mWindowAttributes.colormap);
 	XDestroyWindow(mXDisplay,mWindow);
 	XCloseDisplay(mXDisplay);
 	mXDisplay = nullptr;
@@ -2080,7 +2084,7 @@ void X11GLEmulation::RedrawWindow()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Pixel Font bits, packed image. Used to create a texture
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-const std::vector<uint32_t> GLES::mFont16x16Data =
+const std::array<uint32_t,8192> GLES::mFont16x16Data =
 {
 	0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0xf,0xf0000000,0xf,0xf0000000,0xf,0xf0000000,0x0,0x0,0x0,0x0,0xffff,0xffff0000,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,
 	0x0,0x0,0x0,0x0,0x0,0x0,0xf,0xf0000000,0xf,0xf0000000,0xf,0xf0000000,0x0,0x0,0x0,0x0,0xffff,0xffff0000,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0xf,0xf0000000,0xf,0xf0000000,0xf,0xf0000000,0x0,0x0,0x0,0x0,0xffff,0xffff0000,0x0,0x0,0x0,0x0,0xf,0xffff0000,0xff,0xff000000,0x0,0x0,0x0,0xfff0000,0xfff,0xfff00000,

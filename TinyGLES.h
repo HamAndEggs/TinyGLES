@@ -63,7 +63,7 @@
 	#define eglSwapBuffers(DISPLAY__,SURFACE__)			{if(mNativeWindow){mNativeWindow->RedrawWindow();}}
 	#define eglDestroyContext(DISPLAY__, CONTEXT__)
 	#define eglDestroySurface(DISPLAY__, SURFACE__)
-	#define eglTerminate(DISPLAY__)
+	#define eglTerminate(DISPLAY__)						{delete mNativeWindow;}
 	#define eglSwapInterval(DISPLAY__,INTERVAL__)
 	#define glColorMask(RED__,GREEN__,BLUE__,ALPHA__)
 
@@ -601,7 +601,7 @@ private:
 	};
 	std::map<uint32_t,GLTexture> mTextures; //!< Our textures
 
-	static const std::vector<uint32_t> mFont16x16Data;	//!< used to rebuild font texture.
+	static const std::array<uint32_t,8192> mFont16x16Data;	//!< used to rebuild font texture.
 	struct
 	{
 		uint32_t texture = 0; //!< The texture used for rendering the pixel font.

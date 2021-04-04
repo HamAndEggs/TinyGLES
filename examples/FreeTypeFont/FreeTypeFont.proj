@@ -87,8 +87,7 @@
                 "m",
                 "freetype",
                 "GL",
-                "X11",
-                "z"
+                "X11"
             ],
             "define": [
                 "DEBUG_BUILD",
