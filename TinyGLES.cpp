@@ -274,6 +274,12 @@ GLES::GLES(bool pVerbose) :
 GLES::~GLES()
 {
 	VERBOSE_MESSAGE("GLES destructor called");
+
+	VERBOSE_MESSAGE("On exit the following scratch memory buffers reached the sizes of...");
+	VERBOSE_MESSAGE("    mWorkBuffers.vec2Df " << mWorkBuffers.vec2Df.MemoryUsed() << " bytes");
+	VERBOSE_MESSAGE("    mWorkBuffers.vec2Ds " << mWorkBuffers.vec2Ds.MemoryUsed() << " bytes");
+	VERBOSE_MESSAGE("    mWorkBuffers.uvShort " << mWorkBuffers.uvShort.MemoryUsed() << " bytes");
+
 	glBindTexture(GL_TEXTURE_2D,0);
 	CHECK_OGL_ERRORS();
 
@@ -429,13 +435,9 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	{
         pNumPoints = (int)(3 + (std::sqrt(pRadius)*3));
 	}
+	if( pNumPoints > 128 ){pNumPoints = 128;}	// Make sure we don't go silly with number of verts and loose all the FPS.
 
-	// Make sure we don't go too far.
-	if( pNumPoints > mWorkBuffers.vec2Df.size() )
-	{
-		pNumPoints = mWorkBuffers.vec2Df.size();
-	}
-
+	Vec2Df* verts = mWorkBuffers.vec2Df.Restart(pNumPoints);
 
 	float rad = 0.0;
 	const float step = GetRadian() / (float)(pNumPoints-2);//+2 is because of first triangle.
@@ -444,13 +446,13 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	const float y = (float)pCenterY;
 	for( size_t n = 0 ; n < pNumPoints ; n++, rad += step )
 	{
-		mWorkBuffers.vec2Df[n].x = x - (r*std::sin(rad));
-		mWorkBuffers.vec2Df[n].y = y + (r*std::cos(rad));
+		verts[n].x = x - (r*std::sin(rad));
+		verts[n].y = y + (r*std::cos(rad));
 	}
 
 	EnableShader(mShaders.ColourOnly,0,pRed,pGreen,pBlue,pAlpha);
 
-	VertexPtr(2,GL_FLOAT,8,mWorkBuffers.vec2Df.data());
+	VertexPtr(2,GL_FLOAT,8,verts);
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,pNumPoints);
 	CHECK_OGL_ERRORS();
 }
@@ -478,17 +480,13 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 
 	// Need a multiple of 4 points.
 	numPoints = (numPoints+3)&~3;
-
-	// Make sure we don't go too far.
-	if( numPoints > mWorkBuffers.vec2Df.size() )
-	{
-		numPoints = mWorkBuffers.vec2Df.size();
-	}
+	if( numPoints > 128 ){numPoints = 128;}	// Make sure we don't go silly with number of verts and loose all the FPS.
+	Vec2Df* verts = mWorkBuffers.vec2Df.Restart(numPoints);
 
 	float rad = GetRadian();
 	const float step = GetRadian() / (float)(numPoints-1);
 	const float r = (float)pRadius;
-	Vec2Df* p = mWorkBuffers.vec2Df.data();
+	Vec2Df* p = verts;
 
 	pToX -= pRadius;
 	pToY -= pRadius;
@@ -529,7 +527,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 
 	EnableShader(mShaders.ColourOnly,0,pRed,pGreen,pBlue,pAlpha);
 
-	VertexPtr(2,GL_FLOAT,8,mWorkBuffers.vec2Df.data());
+	VertexPtr(2,GL_FLOAT,8,verts);
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,numPoints);
 	CHECK_OGL_ERRORS();
 }
@@ -541,20 +539,6 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 // Texture commands.
 uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,TextureFormat pFormat,bool pFiltered,bool pGenerateMipmaps)
 {
-	// pPixels can be null if you're going to fill it later.
-	// But there is a gotcha, if you don't write to all the pixels the texture will not work.
-	// So what I do, to make the code usable, is if you pass NULL I will use a buffer to fill the
-	// the pixels with zero. Not ideal, but that's GL! Better than loosing days because your texture is black...
-	if( pPixels == nullptr )
-	{
-		const size_t size = pWidth*pHeight*4;
-		if( size > mWorkBuffers.zeroPixels.size() )
-		{
-			mWorkBuffers.zeroPixels.resize(size);
-		}
-		pPixels = mWorkBuffers.zeroPixels.data();
-	}
-
 	const GLint format = TextureFormatToGLFormat(pFormat);
 	if( format == GL_INVALID_ENUM )
 	{
@@ -711,17 +695,13 @@ void GLES::DeleteTexture(uint32_t pTexture)
 void GLES::FontPrint(int pX,int pY,const char* pText)
 {
 	const std::string_view s(pText);
-	mWorkBuffers.vec2Ds.Reset();
-	mWorkBuffers.uvShort.Reset();
+	mWorkBuffers.vec2Ds.Restart();
+	mWorkBuffers.uvShort.Restart();
 
 	// Get where the uvs will be written too.
 	const int quadSize = 16 * mPixelFont.scale;
 	const int squishHack = 3 * mPixelFont.scale;
 	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,s.size(),quadSize - squishHack,0);
-	const Vec2Ds* verts = mWorkBuffers.vec2Ds.data();
-
-	// how many?
-	const int numVerts = mWorkBuffers.vec2Ds.size();
 
 	// Get where the uvs will be written too.
 	const int maxUV = 32767;
@@ -732,24 +712,22 @@ void GLES::FontPrint(int pX,int pY,const char* pText)
 		const int y = ((int)c>>4) * charSize;
 		mWorkBuffers.uvShort.BuildQuad(x+64,y+64,charSize-128,charSize-128);// The +- 64 is because of filtering. Makes font look nice at normal size.
 	}
-	const Vec2Ds* uvs = mWorkBuffers.uvShort.data();
 
 	// Continue adding uvs to the buffer after the verts.
-
 	EnableShader(mShaders.TextureAlphaOnly,mPixelFont.texture,mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
 
-	assert(verts);
-	assert(uvs);
+	// how many?
+	const int numVerts = mWorkBuffers.vec2Ds.Used();
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TEXCOORD,
 				2,
 				GL_SHORT,
 				GL_TRUE,
-				4,uvs);
+				4,mWorkBuffers.uvShort.Data());
 	CHECK_OGL_ERRORS();
 
-	VertexPtr(2,GL_SHORT,4,verts);
+	VertexPtr(2,GL_SHORT,4,mWorkBuffers.vec2Ds.Data());
 	CHECK_OGL_ERRORS();
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
 	CHECK_OGL_ERRORS();
@@ -819,19 +797,13 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 	auto& font = mFreeTypeFonts.at(pFont);
 //	FillRectangle(10,10,510,510,font->mTexture);
 
-	mWorkBuffers.vec2Ds.Reset();
-	mWorkBuffers.uvShort.Reset();
-	
+	mWorkBuffers.vec2Ds.Restart();
+	mWorkBuffers.uvShort.Restart();
 
 	// Get where the uvs will be written too.
 	const int quadSize = 16 * mPixelFont.scale;
 	const int squishHack = 3 * mPixelFont.scale;
 	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,pText.size(),quadSize - squishHack,0);
-	
-	const Vec2Ds* verts = mWorkBuffers.vec2Ds.data();
-
-	// how many?
-	const int numVerts = mWorkBuffers.vec2Ds.size();
 
 	// Get where the uvs will be written too.
 	for( auto c : pText )
@@ -852,19 +824,21 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 			pX += font->mGlyphs[0].advance;
 		}
 	}
-	const Vec2Ds* uvs = mWorkBuffers.uvShort.data();
 
 	assert(font->mTexture);
 	EnableShader(mShaders.TextureAlphaOnly,font->mTexture,font->mColour.R,font->mColour.G,font->mColour.B,font->mColour.A);
+
+	// how many?
+	const int numVerts = mWorkBuffers.vec2Ds.Used();
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TEXCOORD,
 				2,
 				GL_SHORT,
 				GL_TRUE,
-				4,uvs);
+				4,mWorkBuffers.uvShort.Data());
 
-	VertexPtr(2,GL_SHORT,4,verts);
+	VertexPtr(2,GL_SHORT,4,mWorkBuffers.vec2Ds.Data());
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
 	CHECK_OGL_ERRORS();
 }

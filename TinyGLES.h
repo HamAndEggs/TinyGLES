@@ -28,6 +28,8 @@
 #include <vector>
 #include <map>
 #include <string_view>
+#include <stdexcept>
+#include <cstring>
 
 #include <signal.h>
 #include <assert.h>
@@ -148,60 +150,8 @@ typedef std::shared_ptr<struct GLShader> TinyShader;
 struct X11GLEmulation;
 struct FreeTypeFont;
 
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// vertex buffer utility
-///////////////////////////////////////////////////////////////////////////////////////////////////////////
-template<typename _VertexType> struct VertexBuffer
-{
-	inline void Reset()
-	{
-		mVerts.resize(0);// I'm taking it on faith that this does nothing but set an int to zero. 
-	}
-
-	/**
-	 * @brief Writes six vertices to the buffer.
-	 */
-	inline void BuildQuad(int pX,int pY,int pWidth,int pHeight)
-	{
-		mVerts.emplace_back(pX,pY);
-		mVerts.emplace_back(pX + pWidth,pY);
-		mVerts.emplace_back(pX + pWidth,pY + pHeight);
-
-		mVerts.emplace_back(pX,pY);
-		mVerts.emplace_back(pX + pWidth,pY + pHeight);
-		mVerts.emplace_back(pX,pY + pHeight);
-	}
-
-	inline void AddUVRect(int U0,int V0,int U1,int V1)
-	{
-		mVerts.emplace_back(U0,V0);
-		mVerts.emplace_back(U1,V0);
-		mVerts.emplace_back(U1,V1);
-
-		mVerts.emplace_back(U0,V0);
-		mVerts.emplace_back(U1,V1);
-		mVerts.emplace_back(U0,V1);
-	}
-
-	/**
-	 * @brief Adds a number of quads to the buffer, moving STEP for each one.
-	 */
-	inline void BuildQuads(int pX,int pY,int pWidth,int pHeight,int pCount,int pXStep,int pYStep)
-	{
-		for(int n = 0 ; n < pCount ; n++, pX += pXStep, pY += pYStep )
-		{
-			BuildQuad(pX,pY,pWidth,pHeight);
-		}
-	}
-
-	const size_t size()const{return mVerts.size();}
-	const _VertexType* data()const{return mVerts.data();}
-
-private:
-	std::vector<_VertexType> mVerts;
-};
-///////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 constexpr float GetPI()
 {
 	return std::acos(-1);
@@ -240,6 +190,128 @@ struct Matrix4x4
 	float m[4][4];
 };
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// scratch memory buffer utility
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+template<typename SCRATCH_MEMORY_TYPE,int START_TYPE_COUNT,int GROWN_TYPE_COUNT,int MAXIMUN_GROWN_COUNT> struct ScratchBuffer
+{
+	ScratchBuffer():mMemory(new SCRATCH_MEMORY_TYPE[START_TYPE_COUNT]),mCount(START_TYPE_COUNT),mNextIndex(0){}
+	~ScratchBuffer(){delete []mMemory;}
+	
+	/**
+	 * @brief Start filling your data from the start of the buffer, overwriting what maybe there. This is the core speed up we get.
+	 */
+	void Restart(){mNextIndex = 0;}
+
+	/**
+	 * @brief For when you know in advance how much space you need.
+	 */
+	SCRATCH_MEMORY_TYPE* Restart(size_t pCount)
+	{
+		mNextIndex = 0;
+		return Next(pCount);
+	}
+
+	/**
+	 * @brief Return enough memory to put the next N items into, you can only safety write the number of items requested.
+	 */
+	SCRATCH_MEMORY_TYPE* Next(size_t pCount = 1)
+	{
+		EnsureSpace(pCount);
+		SCRATCH_MEMORY_TYPE* next = mMemory + mNextIndex;
+		mNextIndex += pCount;
+		return next;
+	}
+
+	/**
+	 * @brief How many items have been written since Restart was called.
+	 */
+	const size_t Used()const{return mNextIndex;}
+
+	/**
+	 * @brief Diagnostics tool, how many bytes we're using.
+	 */
+	const size_t MemoryUsed()const{return mCount * sizeof(SCRATCH_MEMORY_TYPE);}
+
+	/**
+	 * @brief The root of our memory, handy for when you've finished filling the buffer and need to now do work with it.
+	 * You should fetch this memory pointer AFTER you have done your work as it may change as you fill the data.
+	 */
+	const SCRATCH_MEMORY_TYPE* Data()const{return mMemory;}
+
+private:
+	SCRATCH_MEMORY_TYPE* mMemory; //<! Our memory, only reallocated when it's too small. That is the speed win!
+	size_t mCount; //<! How many there are available to write too.
+	size_t mNextIndex; //<! Where we can write to next.
+
+	/**
+	 * @brief Makes sure we always have space.
+	 */
+	void EnsureSpace(size_t pExtraSpaceNeeded)
+	{
+		if( pExtraSpaceNeeded > MAXIMUN_GROWN_COUNT )
+		{
+			throw std::runtime_error("Scratch memory type tried to grow too large in one go, you may have a memory bug. Tried to add " + std::to_string(pExtraSpaceNeeded) + " items");
+		}
+
+		if( (mNextIndex + pExtraSpaceNeeded) >= mCount )
+		{
+			const size_t newCount = mCount + pExtraSpaceNeeded + GROWN_TYPE_COUNT;
+			SCRATCH_MEMORY_TYPE* newMemory = new SCRATCH_MEMORY_TYPE[newCount];
+			std::memmove(newMemory,mMemory,mCount);
+			mCount = newCount;
+		}
+	}
+};
+
+/**
+ * @brief Simple utility for building quads on the fly.
+ */
+struct Vec2DShortScratchBuffer : public ScratchBuffer<Vec2Ds,256,64,1024>
+{
+	/**
+	 * @brief Writes six vertices to the buffer.
+	 */
+	inline void BuildQuad(int pX,int pY,int pWidth,int pHeight)
+	{
+		Vec2Ds* verts = Next(6);
+		verts[0].x = pX;			verts[0].y = pY;
+		verts[1].x = pX + pWidth;	verts[1].y = pY;
+		verts[2].x = pX + pWidth;	verts[2].y = pY + pHeight;
+
+		verts[3].x = pX;			verts[3].y = pY;
+		verts[4].x = pX + pWidth;	verts[4].y = pY + pHeight;
+		verts[5].x = pX;			verts[5].y = pY + pHeight;
+	}
+
+	/**
+	 * @brief Writes the UV's to six vertices in the correct order to match the quad built above.
+	 */
+	inline void AddUVRect(int U0,int V0,int U1,int V1)
+	{
+		Vec2Ds* verts = Next(6);
+		verts[0].x = U0;	verts[0].y = V0;
+		verts[1].x = U1;	verts[1].y = V0;
+		verts[2].x = U1;	verts[2].y = V1;
+
+		verts[3].x = U0;	verts[3].y = V0;
+		verts[4].x = U1;	verts[4].y = V1;
+		verts[5].x = U0;	verts[5].y = V1;
+	}
+
+	/**
+	 * @brief Adds a number of quads to the buffer, moving STEP for each one.
+	 */
+	inline void BuildQuads(int pX,int pY,int pWidth,int pHeight,int pCount,int pXStep,int pYStep)
+	{
+		for(int n = 0 ; n < pCount ; n++, pX += pXStep, pY += pYStep )
+		{
+			BuildQuad(pX,pY,pWidth,pHeight);
+		}
+	}
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
  * @brief Represents the linux frame buffer display.
  * Is able to deal with and abstract out the various pixel formats. 
@@ -365,6 +437,7 @@ public:
 	 * @brief Create a Texture object with the size passed in and a given name. 
 	 * pPixels is either RGB format 24bit or RGBA 32bit format is pHasAlpha is true.
 	 * pPixels can be null if you're going to use FillTexture later to set the image data.
+	 * But there is a GL gotcha with passing null, if you don't write to ALL the pixels the texture will not work. So if you're texture is always black you may not have filled it all.
 	 */
 	uint32_t CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,TextureFormat pFormat,bool pFiltered = false,bool pGenerateMipmaps = false);
 
@@ -496,10 +569,9 @@ private:
 
 	struct
 	{
-		std::array<Vec2Df,128> vec2Df;
-		VertexBuffer<Vec2Ds> vec2Ds;
-		VertexBuffer<Vec2Ds> uvShort;
-		std::vector<uint8_t> zeroPixels; // Used to initialise a texture when user does not yet have all the pixels data. Please read comment in CreateTexture.
+		ScratchBuffer<Vec2Df,128,16,128> vec2Df;
+		Vec2DShortScratchBuffer vec2Ds;
+		Vec2DShortScratchBuffer uvShort;
 	}mWorkBuffers;
 
 	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.
