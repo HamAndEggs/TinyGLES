@@ -16,7 +16,7 @@ int main(int argc, char *argv[])
     tinygles::GLES GL(true);
 
     const std::string faceName("./Blenda Script.otf");
-    const uint32_t FTFont = GL.FontLoad(faceName,40,true);
+    const uint32_t aFont = GL.FontLoad(faceName,40,true);
 
     int anim = 0;
     while( GL.BeginFrame() )
@@ -29,18 +29,18 @@ int main(int argc, char *argv[])
 
         GL.FontPrint(80,80,"The fixed built in font for comparison");
 
-        GL.FontSetColour(FTFont,255,255,255);
-        GL.FontPrint(FTFont,80,150,"The free type font," + faceName + ", for comparison");
+        GL.FontSetColour(aFont,255,255,255);
+        GL.FontPrint(aFont,80,150,"The free type font," + faceName + ", for comparison");
 
-        GL.FontPrintf(FTFont,80,200,"Anim: %d",anim);
+        GL.FontPrintf(aFont,80,200,"Anim: %d",anim);
 
         GL.FillRectangle(90,260,700,340,0,0,0);
-        GL.FontSetColour(FTFont,255,0,0);
-        GL.FontPrint(FTFont,100,300,"RED");
-        GL.FontSetColour(FTFont,0,255,0);
-        GL.FontPrint(FTFont,300,300,"GREEN");
-        GL.FontSetColour(FTFont,0,0,255);
-        GL.FontPrint(FTFont,500,300,"BLUE");
+        GL.FontSetColour(aFont,255,0,0);
+        GL.FontPrint(aFont,100,300,"RED");
+        GL.FontSetColour(aFont,0,255,0);
+        GL.FontPrint(aFont,300,300,"GREEN");
+        GL.FontSetColour(aFont,0,0,255);
+        GL.FontPrint(aFont,500,300,"BLUE");
 
         GL.EndFrame();
     }
