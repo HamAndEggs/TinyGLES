@@ -443,7 +443,7 @@ public:
 	 * @brief Splats the texture on the screen at it's native size, no scaling etc.
 	 * Handy for when you just want to draw a texture to the display as is.
 	 */
-	inline void Blit(int pX,int pY,uint32_t pTexture,uint8_t pRed = 255,uint8_t pGreen = 255,uint8_t pBlue = 255,uint8_t = 255,uint8_t pAlpha = 255)
+	inline void Blit(uint32_t pTexture,int pX,int pY,uint8_t pRed = 255,uint8_t pGreen = 255,uint8_t pBlue = 255,uint8_t pAlpha = 255)
 	{
 		const auto& tex = mTextures.find(pTexture);
 		if( tex == mTextures.end() )

@@ -58,7 +58,7 @@ struct ABall
             vy = (1+(rand()%7));
         }
 
-        GL.Blit(ballx,bally,ballTexture);
+        GL.Blit(ballTexture,ballx,bally);
     }
 };
 
