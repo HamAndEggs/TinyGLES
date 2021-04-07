@@ -138,6 +138,7 @@ struct FreeTypeFont
 	 * @brief Builds our texture object.
 	 */
 	void BuildTexture(
+			int pMaximumAllowedGlyph,
 			std::function<uint32_t(int pWidth,int pHeight)> pCreateTexture,
 			std::function<void(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels)> pFillTexture);
 
@@ -765,6 +766,7 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 	// Now we need to prepare the texture cache.
 	auto& font = mFreeTypeFonts.at(fontID);
 	font->BuildTexture(
+		mMaximumAllowedGlyph,
 		[this](int pWidth,int pHeight)
 		{
 			// Because the glyph rending to texture does not fill the whole texture the GL texture will not be created.
@@ -1790,6 +1792,7 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 }
 
 void FreeTypeFont::BuildTexture(
+			int pMaximumAllowedGlyph,
 			std::function<uint32_t(int pWidth,int pHeight)> pCreateTexture,
 			std::function<void(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels)> pFillTexture)
 {
@@ -1815,9 +1818,9 @@ void FreeTypeFont::BuildTexture(
 		}
 	}
 	VERBOSE_MESSAGE("Font max glyph size requirement for cache is " << maxX << " " << maxY);
-	if( maxX > 128 || maxY > 128 )
+	if( maxX > pMaximumAllowedGlyph || maxY > pMaximumAllowedGlyph )
 	{
-		THROW_MEANINGFUL_EXCEPTION("Font: " + mFontName + " requires a very large texture as it's maximun size glyph is very big. This creation has been halted. Please reduce size of font!");
+		THROW_MEANINGFUL_EXCEPTION("Font: " + mFontName + " requires a very large texture as it's maximun size glyph is very big, maxX == " + std::to_string(maxX) + " maxY == " + std::to_string(maxY) + ". This creation has been halted. Please reduce size of font!");
 	}
 
 	auto nextPow2 = [](int v)

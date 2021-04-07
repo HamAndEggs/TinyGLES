@@ -445,8 +445,16 @@ public:
 	 */
 	inline void Blit(int pX,int pY,uint32_t pTexture,uint8_t pRed = 255,uint8_t pGreen = 255,uint8_t pBlue = 255,uint8_t = 255,uint8_t pAlpha = 255)
 	{
-		const auto& tex = mTextures.at(pTexture);
-		Rectangle(pX,pY,pX+tex.mWidth-1,pY+tex.mHeight-1,pRed,pGreen,pBlue,pAlpha,true,pTexture);
+		const auto& tex = mTextures.find(pTexture);
+		if( tex == mTextures.end() )
+		{
+			Rectangle(pX,pY,pX+128,pY+128,pRed,pGreen,pBlue,pAlpha,true,mDiagnostics.texture);
+		}
+		else
+		{
+
+			Rectangle(pX,pY,pX+tex->second.mWidth-1,pY+tex->second.mHeight-1,pRed,pGreen,pBlue,pAlpha,true,pTexture);
+		}
 	}
 
 //*******************************************
@@ -499,6 +507,8 @@ public:
 
 	void FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText);
 	void FontPrintf(uint32_t pFont,int pX,int pY,const char* pFmt,...);
+
+	void SetFontMaximumAllowedGlyph(int pMaxSize){mMaximumAllowedGlyph = pMaxSize;} // The default size is 128 per character. Any bigger will throw an exception, this allows you to go bigger, but kiss good by to vram. Really should do something else instead!
 
 #endif
 //*******************************************
@@ -658,6 +668,7 @@ private:
 
 #ifdef USE_FREETYPEFONTS
 	uint32_t mNextFontID = 1;
+	int mMaximumAllowedGlyph = 128;
 	std::map<uint32_t,std::unique_ptr<FreeTypeFont>> mFreeTypeFonts;
 
 	FT_Library mFreetype = nullptr;	
