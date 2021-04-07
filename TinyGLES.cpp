@@ -347,6 +347,13 @@ void GLES::Clear(uint8_t pRed,uint8_t pGreen,uint8_t pBlue)
 	CHECK_OGL_ERRORS();
 }
 
+void GLES::Clear(uint32_t pTexture)
+{
+	glClear(GL_DEPTH_BUFFER_BIT);
+	CHECK_OGL_ERRORS();
+	FillRectangle(0,0,GetWidth()-1,GetHeight()-1,pTexture);
+}
+
 void GLES::SetFrustum2D()
 {
 	VERBOSE_MESSAGE("SetFrustum2D " << mWidth << " " << mHeight);

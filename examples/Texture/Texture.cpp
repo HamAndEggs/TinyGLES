@@ -4,7 +4,7 @@
 #include <iostream>
 #include <assert.h>
 
-static uint32_t LoadTexture(tinygles::GLES &GL,const char* pFilename)
+static uint32_t LoadTexture(tinygles::GLES &GL,const char* pFilename,bool pFiltered = false)
 {
         // Load in a test texture
     uint32_t textureHandle = 0;
@@ -15,13 +15,13 @@ static uint32_t LoadTexture(tinygles::GLES &GL,const char* pFilename)
         {
             std::vector<uint8_t> RGBA;
             png.GetRGBA(RGBA);
-            textureHandle = GL.CreateTexture(png.GetWidth(),png.GetHeight(),RGBA.data(),tinygles::TextureFormat::FORMAT_RGBA);
+            textureHandle = GL.CreateTexture(png.GetWidth(),png.GetHeight(),RGBA.data(),tinygles::TextureFormat::FORMAT_RGBA,pFiltered);
         }
         else
         {
             std::vector<uint8_t> RGB;
             png.GetRGB(RGB);
-            textureHandle = GL.CreateTexture(png.GetWidth(),png.GetHeight(),RGB.data(),tinygles::TextureFormat::FORMAT_RGB);
+            textureHandle = GL.CreateTexture(png.GetWidth(),png.GetHeight(),RGB.data(),tinygles::TextureFormat::FORMAT_RGB,pFiltered);
         }
     }
     assert(textureHandle);
@@ -58,7 +58,7 @@ struct ABall
             vy = (1+(rand()%7));
         }
 
-        GL.FillRectangle(ballx,bally,ballx+64,bally+64,ballTexture);
+        GL.Blit(ballx,bally,ballTexture);
     }
 };
 
@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
     uint32_t create = LoadTexture(GL,"crate.png");
     uint32_t plant = LoadTexture(GL,"plant.png");
     uint32_t debug1 = LoadTexture(GL,"debug.png");
-    uint32_t debug2 = LoadTexture(GL,"debug2.png");
+    uint32_t debug2 = LoadTexture(GL,"debug2.png",true);
     uint32_t ball = LoadTexture(GL,"foot-ball.png");
 
     std::array<ABall,20> balls;
@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
     {
         anim++;
 
-        GL.FillRectangle(0,0,GL.GetWidth(),GL.GetHeight(),GL.GetDiagnosticsTexture());
+        GL.Clear(GL.GetDiagnosticsTexture());
 
         GL.FillRoundedRectangle(50,50,950,550,100,55,20,155);
         GL.DrawRoundedRectangle(50,50,950,550,100,255,255,255);
@@ -104,7 +104,12 @@ int main(int argc, char *argv[])
         GL.FillRectangle(300,100,400,200,plant);
 
         GL.FillRectangle(100,300,300,500,debug1);
-        GL.FillRectangle(400,300,600,500,debug2);
+
+        float sx = ((1.0f + std::sin(anim * 0.021f)) * 0.2f) + 0.9f;
+        float sy = ((1.0f + std::cos(anim * 0.022f)) * 0.2f) + 0.9f;
+        float dx = ((1.0f + std::sin(anim * 0.023f)) * 0.2f) + 0.9f;
+        float dy = ((1.0f + std::cos(anim * 0.024f)) * 0.2f) + 0.9f;
+        GL.FillRectangle((int)(350.0f * sx),(int)(250.0f * sy),(int)(550.0f * dx),(int)(450.0f * dy),debug2);
 
 
         GL.EndFrame();

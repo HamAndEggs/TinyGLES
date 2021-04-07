@@ -377,6 +377,12 @@ public:
 	void Clear(uint8_t pRed,uint8_t pGreen,uint8_t pBlue);
 
 	/**
+	 * @brief Clears the screen using the passed texture, scaling it so it fills the screen.
+	 * Takes a quick route and only clears the Zbuffer, not the RGBA buffer as that is about to be writtin to with our texture.
+	 */
+	void Clear(uint32_t pTexture);
+
+	/**
 	 * @brief Set the Frustum for 2D rending. This is the default mode, you only need to call it if you're mixed 3D with 2D.
 	 */
 	void SetFrustum2D();
@@ -432,6 +438,16 @@ public:
 	void RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,bool pFilled);
 	inline void DrawRoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){RoundedRectangle(pFromX,pFromY,pToX,pToY,pRadius,pRed,pGreen,pBlue,pAlpha,false);}
 	inline void FillRoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){RoundedRectangle(pFromX,pFromY,pToX,pToY,pRadius,pRed,pGreen,pBlue,pAlpha,true);}
+
+	/**
+	 * @brief Splats the texture on the screen at it's native size, no scaling etc.
+	 * Handy for when you just want to draw a texture to the display as is.
+	 */
+	inline void Blit(int pX,int pY,uint32_t pTexture,uint8_t pRed = 255,uint8_t pGreen = 255,uint8_t pBlue = 255,uint8_t = 255,uint8_t pAlpha = 255)
+	{
+		const auto& tex = mTextures.at(pTexture);
+		Rectangle(pX,pY,pX+tex.mWidth-1,pY+tex.mHeight-1,pRed,pGreen,pBlue,pAlpha,true,pTexture);
+	}
 
 //*******************************************
 // Texture commands.
