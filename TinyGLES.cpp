@@ -746,6 +746,29 @@ void GLES::FontPrintf(int pX,int pY,const char* pFmt,...)
 	FontPrint(pX,pY, buf);
 }
 
+int GLES::FontGetPrintWidth(const char* pText)
+{
+	const std::string_view s(pText);
+
+	// Get where the uvs will be written too.
+	const int quadSize = 16 * mPixelFont.scale;
+	const int squishHack = 3 * mPixelFont.scale;
+	const int xStep = quadSize - squishHack;
+
+	return (xStep * s.size());
+}
+
+int GLES::FontGetPrintfWidth(const char* pFmt,...)
+{
+	char buf[1024];	
+	va_list args;
+	va_start(args, pFmt);
+	vsnprintf(buf, sizeof(buf), pFmt, args);
+	va_end(args);
+	return FontGetPrintWidth(buf);
+}
+
+
 // End of Pixel font.
 //*******************************************
 
@@ -804,15 +827,9 @@ void GLES::FontSetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlu
 void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 {
 	auto& font = mFreeTypeFonts.at(pFont);
-//	FillRectangle(10,10,510,510,font->mTexture);
 
 	mWorkBuffers.vec2Ds.Restart();
 	mWorkBuffers.uvShort.Restart();
-
-	// Get where the uvs will be written too.
-//	const int quadSize = 16 * mPixelFont.scale;
-//	const int squishHack = 3 * mPixelFont.scale;
-//	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,pText.size(),quadSize - squishHack,0);
 
 	// Get where the uvs will be written too.
 	for( auto c : pText )
@@ -864,6 +881,37 @@ void GLES::FontPrintf(uint32_t pFont,int pX,int pY,const char* pFmt,...)
 	va_end(args);
 	FontPrint(pFont,pX,pY, buf);
 }
+
+int GLES::FontGetPrintWidth(uint32_t pFont,const std::string_view& pText)
+{
+	auto& font = mFreeTypeFonts.at(pFont);
+
+	// Get where the uvs will be written too.
+	int x = 0;
+	for( auto c : pText )
+	{
+		if( c > 31 || c < 127 )
+		{
+			x += font->mGlyphs.at(c-32).advance;
+		}
+		else
+		{
+			x += font->mGlyphs[0].advance;
+		}
+	}
+	return x;
+}
+
+int GLES::FontGetPrintfWidth(uint32_t pFont,const char* pFmt,...)
+{
+	char buf[1024];	
+	va_list args;
+	va_start(args, pFmt);
+	vsnprintf(buf, sizeof(buf), pFmt, args);
+	va_end(args);
+	return FontGetPrintWidth(pFont,buf);	
+}
+
 #endif
 // End of free type font.
 //*******************************************

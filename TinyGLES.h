@@ -493,6 +493,10 @@ public:
 // Pixel font, low res, mainly for debugging.
 	void FontPrint(int pX,int pY,const char* pText);
 	void FontPrintf(int pX,int pY,const char* pFmt,...);
+
+	int FontGetPrintWidth(const char* pText);
+	int FontGetPrintfWidth(const char* pFmt,...);
+
 	void FontSetScale(int pScale){assert(pScale>0);mPixelFont.scale = pScale;}
 	void FontSetColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){mPixelFont.R = pRed;mPixelFont.G = pGreen;mPixelFont.B = pBlue;mPixelFont.A = pAlpha;}
 
@@ -503,12 +507,14 @@ public:
 	uint32_t FontLoad(const std::string& pFontName,int pPixelHeight = 40,bool pVerbose = false);
 	void FontDelete(uint32_t pFont);
 
-	void FontSetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
-
 	void FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText);
 	void FontPrintf(uint32_t pFont,int pX,int pY,const char* pFmt,...);
 
-	void SetFontMaximumAllowedGlyph(int pMaxSize){mMaximumAllowedGlyph = pMaxSize;} // The default size is 128 per character. Any bigger will throw an exception, this allows you to go bigger, but kiss good by to vram. Really should do something else instead!
+	int FontGetPrintWidth(uint32_t pFont,const std::string_view& pText);
+	int FontGetPrintfWidth(uint32_t pFont,const char* pFmt,...);
+
+	void FontSetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
+	void FontSetMaximumAllowedGlyph(int pMaxSize){mMaximumAllowedGlyph = pMaxSize;} // The default size is 128 per character. Any bigger will throw an exception, this allows you to go bigger, but kiss good by to vram. Really should do something else instead!
 
 #endif
 //*******************************************

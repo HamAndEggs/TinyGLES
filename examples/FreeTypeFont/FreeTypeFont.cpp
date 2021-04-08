@@ -1,6 +1,7 @@
 #include "TinyGLES.h"
 
 #include <iostream>
+#include <cmath>
 
 int main(int argc, char *argv[])
 {
@@ -41,6 +42,12 @@ int main(int argc, char *argv[])
         GL.FontPrint(aFont,300,300,"GREEN");
         GL.FontSetColour(aFont,0,0,255);
         GL.FontPrint(aFont,500,300,"BLUE");
+
+        // Later, I can add FontPrintfJustify and use the GOU to move it once we've built the verts and know the length. Be quicker.
+        const int width = GL.FontGetPrintfWidth(aFont,"Numbers to make to change length: %f -> %d",std::sin(anim*0.021f) * 17.0f,anim);
+        // Now pin to right edge.
+        GL.FontSetColour(aFont,255,255,255);
+        GL.FontPrintf(aFont,GL.GetWidth() - width, 500,"Numbers to make to change length: %f -> %d",std::sin(anim*0.021f) * 17.0f,anim);        
 
         GL.EndFrame();
     }
