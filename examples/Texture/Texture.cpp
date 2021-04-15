@@ -1,5 +1,5 @@
 #include "TinyGLES.h"
-#include "TinyPNG.h"
+#include "../SupportCode/TinyPNG.h"
 
 #include <iostream>
 #include <assert.h>
@@ -76,11 +76,12 @@ int main(int argc, char *argv[])
     tinygles::GLES GL(true);
 
     // Load in a test texture
-    uint32_t create = LoadTexture(GL,"crate.png");
-    uint32_t plant = LoadTexture(GL,"plant.png");
-    uint32_t debug1 = LoadTexture(GL,"debug.png");
-    uint32_t debug2 = LoadTexture(GL,"debug2.png",true);
-    uint32_t ball = LoadTexture(GL,"foot-ball.png");
+    uint32_t Bird_by_Magnus = LoadTexture(GL,"../data/Bird_by_Magnus.png");
+    uint32_t create = LoadTexture(GL,"../data/crate.png");
+    uint32_t plant = LoadTexture(GL,"../data/plant.png");
+    uint32_t debug1 = LoadTexture(GL,"../data/debug.png");
+    uint32_t debug2 = LoadTexture(GL,"../data/debug2.png",true);
+    uint32_t ball = LoadTexture(GL,"../data/foot-ball.png");
 
     std::array<ABall,20> balls;
 
@@ -90,10 +91,10 @@ int main(int argc, char *argv[])
     {
         anim++;
 
-        GL.Clear(GL.GetDiagnosticsTexture());
+        GL.Clear(Bird_by_Magnus);
 
-        GL.FillRoundedRectangle(50,50,950,550,100,55,20,155);
-        GL.DrawRoundedRectangle(50,50,950,550,100,255,255,255);
+        GL.FillRoundedRectangle(50,50,550,550,100,55,20,155,100);
+        GL.DrawRoundedRectangle(50,50,550,550,100,255,255,255);
     
         for( auto& b : balls )
         {

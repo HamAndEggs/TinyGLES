@@ -314,7 +314,7 @@ GLES::~GLES()
 	// delete all textures.
 	for( auto t : mTextures )
 	{
-		glDeleteTextures(1,&t.second.mHandle);
+		glDeleteTextures(1,&t.first);
 		CHECK_OGL_ERRORS();
 	}
 
@@ -553,20 +553,21 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,Textu
 	tex.mWidth = pWidth;
 	tex.mHeight = pHeight;
 
-	glGenTextures(1,&tex.mHandle);
+	GLuint newTexture;
+	glGenTextures(1,&newTexture);
 	CHECK_OGL_ERRORS();
-	if( tex.mHandle == 0 )
+	if( newTexture == 0 )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Failed to create texture, glGenTextures returned zero");
 	}
 
-	if( mTextures.find(tex.mHandle) != mTextures.end() )
+	if( mTextures.find(newTexture) != mTextures.end() )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Bug found in GLES code, glGenTextures returned an index that we already know about.");
 	}
-	mTextures[tex.mHandle] = tex;
+	mTextures[newTexture] = tex;
 
-	glBindTexture(GL_TEXTURE_2D,tex.mHandle);
+	glBindTexture(GL_TEXTURE_2D,newTexture);
 	CHECK_OGL_ERRORS();
 
 	glTexImage2D(
@@ -635,10 +636,10 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,Textu
 	glBindTexture(GL_TEXTURE_2D,0);//Because we had to change it to setup the texture! Stupid GL!
 	CHECK_OGL_ERRORS();
 
-	VERBOSE_MESSAGE("Texture " << tex.mHandle << " created, " << pWidth << "x" << pHeight << " Format = " << TextureFormatToString(pFormat) << " Mipmaps = " << (pGenerateMipmaps?"true":"false") << " Filtered = " << (pFiltered?"true":"false"));
+	VERBOSE_MESSAGE("Texture " << newTexture << " created, " << pWidth << "x" << pHeight << " Format = " << TextureFormatToString(pFormat) << " Mipmaps = " << (pGenerateMipmaps?"true":"false") << " Filtered = " << (pFiltered?"true":"false"));
 
 
-	return tex.mHandle;
+	return newTexture;
 }
 
 void GLES::FillTexture(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels,TextureFormat pFormat,bool pGenerateMips)
@@ -692,6 +693,219 @@ void GLES::DeleteTexture(uint32_t pTexture)
 }
 // End of Texture commands.
 //*******************************************
+// 9 Patch code
+uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,bool pFiltered)
+{
+	if( pWidth < 8 || pWidth < 8 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("CreateNinePatch passed image data that is too small, min size for each axis is 8 pixels");
+	}
+
+	if( pPixels == nullptr )
+	{
+		THROW_MEANINGFUL_EXCEPTION("CreateNinePatch passed null image data, nine patch creation requires pixel data");
+	}
+
+	const int newWidth = pWidth - 2;
+	const int newHeight = pHeight - 2;
+	const int newStride = newWidth * 4;
+	const int oldStride = pWidth * 4;
+
+	// Extract the information
+	NinePatch newNinePatch;
+
+	auto ScanNinePatch = [](uint8_t pPixel,int pIndex,int &pFrom,int &pTo,const std::string& pWhat)
+	{
+		if( pPixel == 0xff )
+		{	// Record first hit of solid.
+			if( pFrom == -1 )
+				pFrom = pIndex;
+		}
+		else if( pPixel == 0x00 )
+		{
+			// Wait till we've found the start before finding the end.
+			if( pFrom != -1 )
+			{	// Record first hit of not solid after solid.
+				if( pTo == -1 )
+					pTo = pIndex - 1;// Previous value is what we want.
+			}
+		}
+		else
+		{
+			THROW_MEANINGFUL_EXCEPTION("Nine patch edge definition pixels contain invalid pix value for " + pWhat + " index " + std::to_string(pIndex) + " value " + std::to_string(pPixel) + ", is it really a nine patch texture?");
+		}
+	};
+
+	// Scan for X scale and X fill start
+	const uint8_t* firstRow = pPixels + 3;// + 3 is to get to the alpha channel
+	const uint8_t* lastRow = pPixels + (oldStride * (pHeight-1)) + 3;
+	for( int x = 0 ; x < pWidth ; x++ )
+	{
+		ScanNinePatch(firstRow[x*4],x,newNinePatch.mScalable.from.x,newNinePatch.mScalable.to.x,"Scalable X");
+		ScanNinePatch(lastRow[x*4],x,newNinePatch.mFillable.from.x,newNinePatch.mFillable.to.x,"Fillable X");
+	}
+
+	// Scan to for scale and X fill start
+	const uint8_t* firstColumn = pPixels + 3;// + 3 is to get to the alpha channel
+	const uint8_t* lastColumn = pPixels + ((pWidth-1)*4) + 3;
+	for( int y = 0 ; y < pHeight ; y++ )
+	{
+		ScanNinePatch(firstColumn[y * oldStride],y,newNinePatch.mScalable.from.y,newNinePatch.mScalable.to.y,"Scalable Y");
+		ScanNinePatch(lastColumn[y * oldStride],y,newNinePatch.mFillable.from.y,newNinePatch.mFillable.to.y,"Fillable Y");
+	}
+
+	// Did we get it all?
+	if( newNinePatch.GetOK() == false )
+	{
+		if( mVerbose )
+		{
+			std::clog << "Nine patch failure,\n";
+			std::clog << "   Scalable X " << newNinePatch.mScalable.from.x << " " << newNinePatch.mScalable.to.x << "\n";
+			std::clog << "   Scalable Y " << newNinePatch.mScalable.from.y << " " << newNinePatch.mScalable.to.y << "\n";
+			std::clog << "   Fillable X " << newNinePatch.mFillable.from.x << " " << newNinePatch.mFillable.to.x << "\n";
+			std::clog << "   Fillable Y " << newNinePatch.mFillable.from.y << " " << newNinePatch.mFillable.to.y << "\n";
+		}
+		THROW_MEANINGFUL_EXCEPTION("Nine patch edge definition invlaid, not all scaling and filling information found. Is it a nine patch texture?");
+	}
+
+	// Now build the verts, that are zero offset, when we render we'll add x and y to them and scale.
+	int k = 0;
+	const std::array<int,4>YCords = {0,newNinePatch.mScalable.from.y,newNinePatch.mScalable.to.y,newHeight};
+	for( int y : YCords )
+	{
+		int n = 0;
+		const std::array<int,4>XCords = {0,newNinePatch.mScalable.from.x,newNinePatch.mScalable.to.x,newWidth};
+		for( int x : XCords )
+		{
+			newNinePatch.mVerts[n][k].x = x;
+			newNinePatch.mVerts[n][k].y = y;
+
+			// Not happy with why I had to swap these around but not for the verts. I need to investigate at some point. Could be to do with the normalization flag.
+			newNinePatch.mUVs[k][n].x = (0x7fff * x) / newWidth;
+			newNinePatch.mUVs[k][n].y = (0x7fff * y) / newHeight;
+			n++;
+		}
+		k++;
+	}
+
+
+	// Remove the outer edge from pixel data
+	uint8_t* newPixels = mWorkBuffers.scratchRam.Restart( newWidth * newHeight * 4 );
+	uint8_t* dst = newPixels;
+	const uint8_t* src = pPixels + oldStride + 4;
+	for( int y = 1 ; y < pHeight-1 ; y++ )
+	{
+		memcpy(dst,src,newStride);
+		dst += newStride;
+		src += oldStride;
+	}
+
+	// Create the texture
+	const uint32_t newTexture = CreateTexture(newWidth,newHeight,newPixels,TextureFormat::FORMAT_RGBA,pFiltered,false);
+	if( newTexture == 0 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("CreateNinePatch failed to create it's texture, you out of vram?");
+	}
+
+	if( mNinePatchs.find(newTexture) != mNinePatchs.end() )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Bug found in GLES CreateNinePatch code, CreateTexture returned an index that we already know about.");
+	}
+
+	// Create the nine patch entry and return.
+	mNinePatchs[newTexture] = newNinePatch;
+
+	return newTexture;
+}
+
+void GLES::DeleteNinePatch(uint32_t pNinePatch)
+{
+	if( mNinePatchs.find(pNinePatch) == mNinePatchs.end() )
+	{
+		THROW_MEANINGFUL_EXCEPTION("An attempt to delete a nine patch that is not a nine patch was made");
+	}
+
+	DeleteTexture(pNinePatch);	// The nine patch handle is also the texture handle.
+	mNinePatchs.erase(pNinePatch);
+}
+
+
+/**
+ * @brief 
+ * @return const NinePatchDrawInfo& Don't hold onto this, will go away / change. Returned to help with rending of content in the fillable area of the nine patch.
+ */
+const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,float pXScale,float pYScale)
+{
+	// Grab out nine pinch object with the data we need.
+	auto found = mNinePatchs.find(pNinePatch);
+	if( found == mNinePatchs.end() )
+	{
+		THROW_MEANINGFUL_EXCEPTION("An attempt to draw a nine patch that is not a nine patch was made");
+	}
+	const NinePatch& ninePinch = found->second;
+
+	// We have to draw 9 rects, with the center scaling the texture.
+	const int xMove = pX + ((ninePinch.mScalable.to.x - ninePinch.mScalable.from.x) * pXScale);
+	const int yMove = pY + ((ninePinch.mScalable.to.y - ninePinch.mScalable.from.y) * pYScale);
+	Vec2Ds* verts = mWorkBuffers.vec2Ds.Restart(16);
+	for( int y = 0 ; y < 4 ; y++ )
+	{
+		for( int x = 0 ; x < 4 ; x++, verts++ )
+		{
+			if( x < 2 )
+			{
+				verts->x = ninePinch.mVerts[x][y].x + pX;
+			}
+			else
+			{
+				verts->x = ninePinch.mVerts[x][y].x + xMove;
+			}
+
+			if( y < 2 )
+			{
+				verts->y = ninePinch.mVerts[x][y].y + pY;
+			}
+			else
+			{
+				verts->y = ninePinch.mVerts[x][y].y + yMove;
+			}
+		}
+	}
+
+	SelectAndEnableShader(pNinePatch,255,255,255,255);
+
+
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::TEXCOORD,
+				2,
+				GL_SHORT,
+				GL_TRUE,
+				4,ninePinch.mUVs);
+	CHECK_OGL_ERRORS();
+
+	static const uint8_t indices[9*6] =
+	{
+		0,1,5,0,5,4,
+		1,2,6,1,6,5,
+		2,3,7,2,7,6,
+
+		4,5,9,4,9,8,
+		5,6,10,5,10,9,
+		6,7,11,6,11,10,
+
+		8,9,13,8,13,12,
+		9,10,14,9,14,13,
+		10,11,15,10,15,14		
+	};
+
+	VertexPtr(2,GL_SHORT,4,mWorkBuffers.vec2Ds.Data());
+	glDrawElements(GL_TRIANGLES,9*6,GL_UNSIGNED_BYTE,indices);
+	CHECK_OGL_ERRORS();
+
+
+	return mNinePatchDrawInfo;
+}
+
 
 //*******************************************
 // Pixel font, low res, mainly for debugging.
@@ -1329,13 +1543,28 @@ void GLES::BuildDebugTexture()
 			dst+=4;
 		}
 	}
+	// Put some dots in so I know which way is up and if it's flipped.
+	pixels[(16*4) + (7*4) + 0] = 0xff;
+	pixels[(16*4) + (7*4) + 1] = 0x0;
+	pixels[(16*4) + (7*4) + 2] = 0x0;
+	pixels[(16*4) + (8*4) + 0] = 0xff;
+	pixels[(16*4) + (8*4) + 1] = 0x0;
+	pixels[(16*4) + (8*4) + 2] = 0x0;
+
+	pixels[(16*4*7) + (14*4) + 0] = 0x00;
+	pixels[(16*4*7) + (14*4) + 1] = 0x0;
+	pixels[(16*4*7) + (14*4) + 2] = 0xff;
+	pixels[(16*4*8) + (14*4) + 0] = 0x00;
+	pixels[(16*4*8) + (14*4) + 1] = 0x0;
+	pixels[(16*4*8) + (14*4) + 2] = 0xff;
+
 	mDiagnostics.texture = CreateTexture(16,16,pixels,tinygles::TextureFormat::FORMAT_RGBA);
 }
 
 void GLES::BuildPixelFontTexture()
 {
 	// This is alpha 4bits per pixel data. So we need to pad it out.
-	std::array<uint8_t,256*256>RGBA;
+	uint8_t* pixels = mWorkBuffers.scratchRam.Restart(256*256);
 	int n = 0;
 	for( auto dword : mFont16x16Data )
 	{
@@ -1345,11 +1574,11 @@ void GLES::BuildPixelFontTexture()
 			const uint32_t mask = (15<<shift);
 
 			uint8_t a = (uint8_t)((dword&mask)>>shift);
-			RGBA[n++] = a<<4|a;
+			pixels[n++] = a<<4|a;
 		}
 	}
 
-	mPixelFont.texture = CreateTexture(256,256,RGBA.data(),tinygles::TextureFormat::FORMAT_ALPHA,true);
+	mPixelFont.texture = CreateTexture(256,256,pixels,tinygles::TextureFormat::FORMAT_ALPHA,true);
 }
 
 void GLES::InitFreeTypeFont()

@@ -27,6 +27,7 @@
 #include <set>
 #include <vector>
 #include <map>
+#include <array>
 #include <string_view>
 #include <stdexcept>
 #include <cstring>
@@ -184,10 +185,46 @@ struct Vec3Df
 	float x,y,z;
 };
 
-
 struct Matrix4x4
 {
 	float m[4][4];
+};
+
+/**
+ * @brief Temperary data on where and how a nine patch was drawn so that content can be drawn on top of it.
+ */
+struct NinePatchDrawInfo
+{
+	struct
+	{
+		struct
+		{
+			int x,y;
+		}top,bottom;
+	}outerRectangle,innerRectangle; // outerRectangle is it's total rendered area. innerRectangle is where you may safely draw over the nine patch. 
+};
+
+/**
+ * @brief Defines our nine patch
+ */
+struct NinePatch
+{
+	struct
+	{
+		struct
+		{
+			int x = -1,y = -1;
+		}from,to;
+	}mScalable,mFillable;
+
+	Vec2Ds mVerts[4][4];
+	Vec2Ds mUVs[4][4];
+
+	bool GetOK()
+	{
+		return  mScalable.from.x != -1 && mScalable.to.x != -1 && mScalable.from.y != -1 && mScalable.to.y != -1 &&
+				mFillable.from.x != -1 && mFillable.to.x != -1 && mFillable.from.y != -1 && mFillable.to.y != -1;
+	}
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -448,12 +485,12 @@ public:
 		const auto& tex = mTextures.find(pTexture);
 		if( tex == mTextures.end() )
 		{
-			Rectangle(pX,pY,pX+128,pY+128,pRed,pGreen,pBlue,pAlpha,true,mDiagnostics.texture);
+			FillRectangle(pX,pY,pX+128,pY+128,pRed,pGreen,pBlue,pAlpha,mDiagnostics.texture);
 		}
 		else
 		{
 
-			Rectangle(pX,pY,pX+tex->second.mWidth-1,pY+tex->second.mHeight-1,pRed,pGreen,pBlue,pAlpha,true,pTexture);
+			FillRectangle(pX,pY,pX+tex->second.mWidth-1,pY+tex->second.mHeight-1,pRed,pGreen,pBlue,pAlpha,pTexture);
 		}
 	}
 
@@ -488,6 +525,30 @@ public:
 	 * @brief Get the Pixel Font Texture object
 	 */
 	uint32_t GetPixelFontTexture()const{return mPixelFont.texture;}
+
+//*******************************************
+// 9 Patch rendering for buttons. Unity calls them 9-slicing. I'm using the Android specification as that is where most of the UI resources are.
+
+	/**
+	 * @brief Create a Nine Patch texture with embedded information about scale and fill area.
+	 * Nine patch uses transparency to define areas that are and are not scaled as well as areas that are safe to be drawn on.
+	 * The guides are straight, 1-pixel black lines drawn on the edge of your image that define the scaling and fill of your image.
+	 * The returned as a normal texture with above rendering functions. The outer pixels are removed.
+	 * When used with DrawNinePatch then will do correct scaling. If handle passed is not a nine patch object code will throw an exception.
+	 * Format of pixels has to be RGBA. The outer edge pixels must be either 0x00 (no alpha) or 0xff (full alpha). If not will throw an excpetion.
+	 */
+	uint32_t CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,bool pFiltered = false);
+
+	/**
+	 * @brief Delete the nine patch, will throw an exception is texture not found.
+	 */
+	void DeleteNinePatch(uint32_t pNinePatch);
+
+	/**
+	 * @brief 
+	 * @return const NinePatchDrawInfo& Don't hold onto this, will go away / change. Returned to help with rending of content in the fillable area of the nine patch.
+	 */
+	const NinePatchDrawInfo& DrawNinePatch(uint32_t pNinePatch,int pX,int pY,float pXScale,float pYScale);
 
 //*******************************************
 // Pixel font, low res, mainly for debugging.
@@ -603,9 +664,10 @@ private:
 
 	struct
 	{
+		ScratchBuffer<uint8_t,128,16,256*256*4> scratchRam;// gets used for some temporary texture operations.
 		ScratchBuffer<Vec2Df,128,16,128> vec2Df;
 		Vec2DShortScratchBuffer vec2Ds;
-		Vec2DShortScratchBuffer uvShort;
+		Vec2DShortScratchBuffer uvShort;		
 	}mWorkBuffers;
 
 	SystemEventHandler mSystemEventHandler = nullptr; //!< Where all events that we are intrested in are routed.
@@ -620,18 +682,19 @@ private:
 		uint32_t frameNumber = 0; //!< What frame we're on. incremented in BeginFrame() So first frame will be 1
 	}mDiagnostics;
 	
-
 	/**
 	 * @brief This is a pain in the arse, because we can't query the values used to create a gl texture we have to store them. horrid API GLES 2.0
 	 */
 	struct GLTexture
 	{
-		uint32_t mHandle;
 		TextureFormat mFormat;
 		int mWidth;
 		int mHeight;
 	};
-	std::map<uint32_t,GLTexture> mTextures; //!< Our textures
+	std::map<uint32_t,GLTexture> mTextures; //!< Our textures. I reuse the GL texture index (handle) for my own. A handy value and works well.
+
+	std::map<uint32_t,NinePatch> mNinePatchs; //!< Our nine patch data, image data is also into the textures map. I reuse the GL texture index (handle) for my own. A handy value and works well.
+	NinePatchDrawInfo mNinePatchDrawInfo;	//!< Temporary buffer used to pass back rending information to the caller of DrawNinePatch
 
 	static const std::array<uint32_t,8192> mFont16x16Data;	//!< used to rebuild font texture.
 	struct
