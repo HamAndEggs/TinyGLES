@@ -37,6 +37,35 @@
 #include <linux/fb.h>
 #include <linux/videodev2.h>
 
+#ifdef PLATFORM_X11_GL
+	#define GL_GLEXT_PROTOTYPES
+	#include <X11/Xlib.h>
+	#include <X11/Xutil.h>
+	#include <GL/gl.h>
+	#include <GL/glext.h>
+	#include <GL/glx.h>
+	#include <GL/glu.h>
+	
+	/**
+	 * @brief Emulate GLES with GL and X11, some defines to make the implementation cleaner, this is for development, I hate it adds loads of #ifdef's this should stop that.
+	 */
+	#define eglSwapBuffers(DISPLAY__,SURFACE__)			{mPlatform->RedrawWindow();}
+	#define eglDestroyContext(DISPLAY__, CONTEXT__)
+	#define eglDestroySurface(DISPLAY__, SURFACE__)
+	#define eglTerminate(DISPLAY__)
+	#define eglSwapInterval(DISPLAY__,INTERVAL__)
+	#define glColorMask(RED__,GREEN__,BLUE__,ALPHA__)
+#endif
+
+#ifdef BROADCOM_NATIVE_WINDOW // All included from /opt/vc/include
+	#include "bcm_host.h"
+#endif
+
+#ifdef PLATFORM_GLES
+	#include "GLES2/gl2.h"
+	#include "EGL/egl.h"
+#endif
+
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 #ifdef DEBUG_BUILD
@@ -58,12 +87,245 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 
 #define THROW_MEANINGFUL_EXCEPTION(THE_MESSAGE__)	{throw std::runtime_error("At: " + std::to_string(__LINE__) + " In " + std::string(__FILE__) + " : " + std::string(THE_MESSAGE__));}
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Internal structures.
+
+struct Vec2Df
+{
+	float x,y;
+};
+
+struct Vec2Ds
+{
+	Vec2Ds() = default;
+	Vec2Ds(int16_t pX,int16_t pY):x(pX),y(pY){};
+	int16_t x,y;
+};
+
+struct Vec3Df
+{
+	float x,y,z;
+};
+
 struct Quad3D
 {
 	Vec3Df v[4];
 
 	const float* Data()const{return &v[0].x;}
 };
+
+/**
+ * @brief This is a pain in the arse, because we can't query the values used to create a gl texture we have to store them. horrid API GLES 2.0
+ */
+struct GLTexture
+{
+	GLTexture() = delete; // Forces use to use references.
+	GLTexture(TextureFormat pFormat,int pWidth,int pHeight):mFormat(pFormat),mWidth(pWidth),mHeight(pHeight){}
+
+	const TextureFormat mFormat;
+	const int mWidth;
+	const int mHeight;
+};
+
+/**
+ * @brief Defines our nine patch
+ */
+struct NinePatch
+{
+	NinePatch() = delete;
+
+	NinePatch(int pWidth,int pHeight,const Vec2Ds& pScaleFrom,const Vec2Ds& pScaleTo,const Vec2Ds& pFillFrom,const Vec2Ds& pFillTo)
+	{
+		mScalable.from = pScaleFrom;
+		mScalable.to = pScaleTo;
+
+		mFillable.from = pFillFrom;
+		mFillable.to = pFillTo;
+
+		// Now build the verts, that are zero offset, when we render we'll add x and y to them and scale.
+		int k = 0;
+		const std::array<int,4>YCords = {0,pScaleFrom.y,pScaleTo.y,pHeight};
+		for( int y : YCords )
+		{
+			int n = 0;
+			const std::array<int,4>XCords = {0,pScaleFrom.x,pScaleTo.y,pWidth};
+			for( int x : XCords )
+			{
+				mVerts[n][k].x = x;
+				mVerts[n][k].y = y;
+
+				// Not happy with why I had to swap these around but not for the verts. I need to investigate at some point. Could be to do with the normalization flag.
+				mUVs[k][n].x = (0x7fff * x) / pWidth;
+				mUVs[k][n].y = (0x7fff * y) / pHeight;
+				n++;
+			}
+			k++;
+		}
+	}
+
+	struct
+	{
+		Vec2Ds from,to;
+	}mScalable,mFillable;
+
+	Vec2Ds mVerts[4][4];
+	Vec2Ds mUVs[4][4];
+};
+
+enum struct StreamIndex
+{
+	VERTEX				= 0,		//!< Vertex positional data.
+	TEXCOORD			= 1,		//!< Texture coordinate information.
+	COLOUR				= 2,		//!< Colour type is in the format RGBA.
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// scratch memory buffer utility
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+template<typename SCRATCH_MEMORY_TYPE,int START_TYPE_COUNT,int GROWN_TYPE_COUNT,int MAXIMUN_GROWN_COUNT> struct ScratchBuffer
+{
+	ScratchBuffer():mMemory(new SCRATCH_MEMORY_TYPE[START_TYPE_COUNT]),mCount(START_TYPE_COUNT),mNextIndex(0){}
+	~ScratchBuffer(){delete []mMemory;}
+	
+	/**
+	 * @brief Start filling your data from the start of the buffer, overwriting what maybe there. This is the core speed up we get.
+	 */
+	void Restart(){mNextIndex = 0;}
+
+	/**
+	 * @brief For when you know in advance how much space you need.
+	 */
+	SCRATCH_MEMORY_TYPE* Restart(size_t pCount)
+	{
+		mNextIndex = 0;
+		return Next(pCount);
+	}
+
+	/**
+	 * @brief Return enough memory to put the next N items into, you can only safety write the number of items requested.
+	 */
+	SCRATCH_MEMORY_TYPE* Next(size_t pCount = 1)
+	{
+		EnsureSpace(pCount);
+		SCRATCH_MEMORY_TYPE* next = mMemory + mNextIndex;
+		mNextIndex += pCount;
+		return next;
+	}
+
+	/**
+	 * @brief How many items have been written since Restart was called.
+	 */
+	const size_t Used()const{return mNextIndex;}
+
+	/**
+	 * @brief Diagnostics tool, how many bytes we're using.
+	 */
+	const size_t MemoryUsed()const{return mCount * sizeof(SCRATCH_MEMORY_TYPE);}
+
+	/**
+	 * @brief The root of our memory, handy for when you've finished filling the buffer and need to now do work with it.
+	 * You should fetch this memory pointer AFTER you have done your work as it may change as you fill the data.
+	 */
+	const SCRATCH_MEMORY_TYPE* Data()const{return mMemory;}
+
+private:
+	SCRATCH_MEMORY_TYPE* mMemory; //<! Our memory, only reallocated when it's too small. That is the speed win!
+	size_t mCount; //<! How many there are available to write too.
+	size_t mNextIndex; //<! Where we can write to next.
+
+	/**
+	 * @brief Makes sure we always have space.
+	 */
+	void EnsureSpace(size_t pExtraSpaceNeeded)
+	{
+		if( pExtraSpaceNeeded > MAXIMUN_GROWN_COUNT )
+		{
+			throw std::runtime_error("Scratch memory type tried to grow too large in one go, you may have a memory bug. Tried to add " + std::to_string(pExtraSpaceNeeded) + " items");
+		}
+
+		if( (mNextIndex + pExtraSpaceNeeded) >= mCount )
+		{
+			const size_t newCount = mCount + pExtraSpaceNeeded + GROWN_TYPE_COUNT;
+			SCRATCH_MEMORY_TYPE* newMemory = new SCRATCH_MEMORY_TYPE[newCount];
+			std::memmove(newMemory,mMemory,mCount);
+			delete []mMemory;
+			mMemory = newMemory;
+			mCount = newCount;
+		}
+	}
+};
+
+/**
+ * @brief Simple utility for building quads on the fly.
+ */
+struct Vec2DShortScratchBuffer : public ScratchBuffer<Vec2Ds,256,64,1024>
+{
+	/**
+	 * @brief Writes six vertices to the buffer.
+	 */
+	inline void BuildQuad(int pX,int pY,int pWidth,int pHeight)
+	{
+		Vec2Ds* verts = Next(6);
+		verts[0].x = pX;			verts[0].y = pY;
+		verts[1].x = pX + pWidth;	verts[1].y = pY;
+		verts[2].x = pX + pWidth;	verts[2].y = pY + pHeight;
+
+		verts[3].x = pX;			verts[3].y = pY;
+		verts[4].x = pX + pWidth;	verts[4].y = pY + pHeight;
+		verts[5].x = pX;			verts[5].y = pY + pHeight;
+	}
+
+	/**
+	 * @brief Writes the UV's to six vertices in the correct order to match the quad built above.
+	 */
+	inline void AddUVRect(int U0,int V0,int U1,int V1)
+	{
+		Vec2Ds* verts = Next(6);
+		verts[0].x = U0;	verts[0].y = V0;
+		verts[1].x = U1;	verts[1].y = V0;
+		verts[2].x = U1;	verts[2].y = V1;
+
+		verts[3].x = U0;	verts[3].y = V0;
+		verts[4].x = U1;	verts[4].y = V1;
+		verts[5].x = U0;	verts[5].y = V1;
+	}
+
+	/**
+	 * @brief Adds a number of quads to the buffer, moving STEP for each one.
+	 */
+	inline void BuildQuads(int pX,int pY,int pWidth,int pHeight,int pCount,int pXStep,int pYStep)
+	{
+		for(int n = 0 ; n < pCount ; n++, pX += pXStep, pY += pYStep )
+		{
+			BuildQuad(pX,pY,pWidth,pHeight);
+		}
+	}
+};
+
+struct WorkBuffers
+{
+	ScratchBuffer<uint8_t,128,16,256*256*4> scratchRam;// gets used for some temporary texture operations.
+	ScratchBuffer<Vec2Df,128,16,128> vec2Df;
+	Vec2DShortScratchBuffer vec2Ds;
+	Vec2DShortScratchBuffer uvShort;		
+};
+
+// End of scratch memory buffer utility
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+constexpr float GetPI()
+{
+	return std::acos(-1);
+}
+
+constexpr float GetRadian()
+{
+	return 2.0f * GetPI();
+}
+
+constexpr float DegreeToRadian(float pDegree)
+{
+	return pDegree * (GetPI()/180.0f);
+}
 
 constexpr float ColourToFloat(uint8_t pColour)
 {
@@ -169,8 +431,8 @@ struct GLShader
 
 	int GetUniformLocation(const char* pName);
 	void BindAttribLocation(int location,const char* pName);
-	void Enable(const Matrix4x4& projInvcam);
-	void SetTransform(Matrix4x4& transform);
+	void Enable(const float projInvcam[4][4]);
+	void SetTransform(float transform[4][4]);
 	void SetTransform(float x,float y,float z);
 	void SetTransformIdentity();
 	void SetGlobalColour(uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha);
@@ -196,6 +458,25 @@ struct GLShader
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// GLES 2.0 emulation hidden definition.
+#ifdef PLATFORM_GLES
+struct PlatformInterface
+{
+	PlatformInterface(bool pVerbose){}
+
+	EGLDisplay mDisplay = nullptr;				//!<GL display
+	EGLSurface mSurface = nullptr;				//!<GL rendering surface
+	EGLContext mContext = nullptr;				//!<GL rendering context
+	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
+	#ifdef BROADCOM_NATIVE_WINDOW
+		EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
+	#else 
+		EGLNativeWindowType mNativeWindow;
+	#endif
+};
+#endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // X11 GL emulation hidden definition.
 // Implementation is at the bottom of the source file.
 // This code is intended to allow development on a full desktop system for applications that
@@ -206,7 +487,7 @@ struct GLShader
  * @brief Emulation layer for X11
  * 
  */
-struct X11GLEmulation
+struct PlatformInterface
 {
 	const bool mVerbose;
 	Display *mXDisplay = nullptr;
@@ -218,8 +499,13 @@ struct X11GLEmulation
 
 	bool mWindowReady;
 
-	X11GLEmulation(bool pVerbose);
-	~X11GLEmulation();
+	PlatformInterface(bool pVerbose);
+	~PlatformInterface();
+
+	/**
+	 * @brief Creates the X11 window and all the bits needed to get rendering with.
+	 */
+	void Create();
 
 	/**
 	 * @brief Processes the X11 events then exits when all are done. Returns true if the app is asked to quit.
@@ -238,7 +524,9 @@ struct X11GLEmulation
 // GLES Implementation
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 GLES::GLES(bool pVerbose) :
-	mVerbose(pVerbose)
+	mVerbose(pVerbose),
+	mPlatform(std::make_unique<PlatformInterface>(pVerbose)),
+	mWorkBuffers(std::make_unique<WorkBuffers>())
 {
 	// Lets hook ctrl + c.
 	mUsersSignalAction = signal(SIGINT,CtrlHandler);
@@ -281,9 +569,9 @@ GLES::~GLES()
 	VERBOSE_MESSAGE("GLES destructor called");
 
 	VERBOSE_MESSAGE("On exit the following scratch memory buffers reached the sizes of...");
-	VERBOSE_MESSAGE("    mWorkBuffers.vec2Df " << mWorkBuffers.vec2Df.MemoryUsed() << " bytes");
-	VERBOSE_MESSAGE("    mWorkBuffers.vec2Ds " << mWorkBuffers.vec2Ds.MemoryUsed() << " bytes");
-	VERBOSE_MESSAGE("    mWorkBuffers.uvShort " << mWorkBuffers.uvShort.MemoryUsed() << " bytes");
+	VERBOSE_MESSAGE("    mWorkBuffers.vec2Df " << mWorkBuffers->vec2Df.MemoryUsed() << " bytes");
+	VERBOSE_MESSAGE("    mWorkBuffers.vec2Ds " << mWorkBuffers->vec2Ds.MemoryUsed() << " bytes");
+	VERBOSE_MESSAGE("    mWorkBuffers.uvShort " << mWorkBuffers->uvShort.MemoryUsed() << " bytes");
 
 	glBindTexture(GL_TEXTURE_2D,0);
 	CHECK_OGL_ERRORS();
@@ -312,7 +600,7 @@ GLES::~GLES()
 	}
 #endif
 	// delete all textures.
-	for( auto t : mTextures )
+	for( auto& t : mTextures )
 	{
 		glDeleteTextures(1,&t.first);
 		CHECK_OGL_ERRORS();
@@ -321,9 +609,9 @@ GLES::~GLES()
 	VERBOSE_MESSAGE("Clearing display");
 
 	VERBOSE_MESSAGE("Destroying contect");
-	eglDestroyContext(mDisplay, mContext);
-    eglDestroySurface(mDisplay, mSurface);
-    eglTerminate(mDisplay);
+	eglDestroyContext(mPlatform->mDisplay, mPlatform->mContext);
+    eglDestroySurface(mPlatform->mDisplay, mPlatform->mSurface);
+    eglTerminate(mPlatform->mDisplay);
 
 	VERBOSE_MESSAGE("All done");
 }
@@ -336,7 +624,7 @@ bool GLES::BeginFrame()
 
 void GLES::EndFrame()
 {
-	eglSwapBuffers(mDisplay,mSurface);
+	eglSwapBuffers(mPlatform->mDisplay,mPlatform->mSurface);
 	glFlush();// This makes sure the display is fully up to date before we allow them to interact with any kind of UI. This is the specified use of this function.
 	ProcessSystemEvents();
 }
@@ -359,25 +647,25 @@ void GLES::SetFrustum2D()
 {
 	VERBOSE_MESSAGE("SetFrustum2D " << mWidth << " " << mHeight);
 
-	mMatrices.projection.m[0][0] = 2.0f / (float)mWidth;
-	mMatrices.projection.m[0][1] = 0;
-	mMatrices.projection.m[0][2] = 0;
-	mMatrices.projection.m[0][3] = 0;
+	mMatrices.projection[0][0] = 2.0f / (float)mWidth;
+	mMatrices.projection[0][1] = 0;
+	mMatrices.projection[0][2] = 0;
+	mMatrices.projection[0][3] = 0;
 
-	mMatrices.projection.m[1][0] = 0;
-	mMatrices.projection.m[1][1] = -2.0f / (float)mHeight;
-	mMatrices.projection.m[1][2] = 0;
-	mMatrices.projection.m[1][3] = 0;
+	mMatrices.projection[1][0] = 0;
+	mMatrices.projection[1][1] = -2.0f / (float)mHeight;
+	mMatrices.projection[1][2] = 0;
+	mMatrices.projection[1][3] = 0;
 		  	
-	mMatrices.projection.m[2][0] = 0;
-	mMatrices.projection.m[2][1] = 0;
-	mMatrices.projection.m[2][2] = 0;
-	mMatrices.projection.m[2][3] = 0;
+	mMatrices.projection[2][0] = 0;
+	mMatrices.projection[2][1] = 0;
+	mMatrices.projection[2][2] = 0;
+	mMatrices.projection[2][3] = 0;
 		  	
-	mMatrices.projection.m[3][0] = -1;
-	mMatrices.projection.m[3][1] = 1;
-	mMatrices.projection.m[3][2] = 0;
-	mMatrices.projection.m[3][3] = 1;
+	mMatrices.projection[3][0] = -1;
+	mMatrices.projection[3][1] = 1;
+	mMatrices.projection[3][2] = 0;
+	mMatrices.projection[3][3] = 1;
 }
 
 void GLES::SetFrustum3D(float pFov, float pAspect, float pNear, float pFar)
@@ -387,25 +675,25 @@ void GLES::SetFrustum3D(float pFov, float pAspect, float pNear, float pFar)
 	float cotangent = 1.0f / tanf(DegreeToRadian(pFov));
 	float q = pFar / (pFar - pNear);
 
-	mMatrices.projection.m[0][0] = cotangent;
-	mMatrices.projection.m[0][1] = 0.0f;
-	mMatrices.projection.m[0][2] = 0.0f;
-	mMatrices.projection.m[0][3] = 0.0f;
+	mMatrices.projection[0][0] = cotangent;
+	mMatrices.projection[0][1] = 0.0f;
+	mMatrices.projection[0][2] = 0.0f;
+	mMatrices.projection[0][3] = 0.0f;
 
-	mMatrices.projection.m[1][0] = 0.0f;
-	mMatrices.projection.m[1][1] = pAspect * cotangent;
-	mMatrices.projection.m[1][2] = 0.0f;
-	mMatrices.projection.m[1][3] = 0.0f;
+	mMatrices.projection[1][0] = 0.0f;
+	mMatrices.projection[1][1] = pAspect * cotangent;
+	mMatrices.projection[1][2] = 0.0f;
+	mMatrices.projection[1][3] = 0.0f;
 
-	mMatrices.projection.m[2][0] = 0.0f;
-	mMatrices.projection.m[2][1] = 0.0f;
-	mMatrices.projection.m[2][2] = q;
-	mMatrices.projection.m[2][3] = 1.0f;
+	mMatrices.projection[2][0] = 0.0f;
+	mMatrices.projection[2][1] = 0.0f;
+	mMatrices.projection[2][2] = q;
+	mMatrices.projection[2][3] = 1.0f;
 
-	mMatrices.projection.m[3][0] = 0.0f;
-	mMatrices.projection.m[3][1] = 0.0f;
-	mMatrices.projection.m[3][2] = -q * pNear;
-	mMatrices.projection.m[3][3] = 0.0f;
+	mMatrices.projection[3][0] = 0.0f;
+	mMatrices.projection[3][1] = 0.0f;
+	mMatrices.projection[3][2] = -q * pNear;
+	mMatrices.projection[3][3] = 0.0f;
 }
 
 void GLES::OnApplicationExitRequest()
@@ -440,7 +728,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	}
 	if( pNumPoints > 128 ){pNumPoints = 128;}	// Make sure we don't go silly with number of verts and loose all the FPS.
 
-	Vec2Df* verts = mWorkBuffers.vec2Df.Restart(pNumPoints);
+	Vec2Df* verts = mWorkBuffers->vec2Df.Restart(pNumPoints);
 
 	float rad = 0.0;
 	const float step = GetRadian() / (float)(pNumPoints-2);//+2 is because of first triangle.
@@ -484,7 +772,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 	// Need a multiple of 4 points.
 	numPoints = (numPoints+3)&~3;
 	if( numPoints > 128 ){numPoints = 128;}	// Make sure we don't go silly with number of verts and loose all the FPS.
-	Vec2Df* verts = mWorkBuffers.vec2Df.Restart(numPoints);
+	Vec2Df* verts = mWorkBuffers->vec2Df.Restart(numPoints);
 
 	float rad = GetRadian();
 	const float step = GetRadian() / (float)(numPoints-1);
@@ -535,6 +823,20 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 	CHECK_OGL_ERRORS();
 }
 
+void GLES::Blit(uint32_t pTexture,int pX,int pY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	const auto& tex = mTextures.find(pTexture);
+	if( tex == mTextures.end() )
+	{
+		FillRectangle(pX,pY,pX+128,pY+128,pRed,pGreen,pBlue,pAlpha,mDiagnostics.texture);
+	}
+	else
+	{
+
+		FillRectangle(pX,pY,pX+tex->second->mWidth-1,pY+tex->second->mHeight-1,pRed,pGreen,pBlue,pAlpha,pTexture);
+	}
+}
+
 // End of primitive draw commands.
 //*******************************************
 
@@ -548,11 +850,6 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,Textu
 		THROW_MEANINGFUL_EXCEPTION("CreateTexture passed an unknown texture format, I can not continue.");
 	}
 
-	GLTexture tex;
-	tex.mFormat = pFormat;
-	tex.mWidth = pWidth;
-	tex.mHeight = pHeight;
-
 	GLuint newTexture;
 	glGenTextures(1,&newTexture);
 	CHECK_OGL_ERRORS();
@@ -565,7 +862,8 @@ uint32_t GLES::CreateTexture(int pWidth,int pHeight,const uint8_t* pPixels,Textu
 	{
 		THROW_MEANINGFUL_EXCEPTION("Bug found in GLES code, glGenTextures returned an index that we already know about.");
 	}
-	mTextures[newTexture] = tex;
+
+	mTextures[newTexture] = std::make_unique<GLTexture>(pFormat,pWidth,pHeight);
 
 	glBindTexture(GL_TEXTURE_2D,newTexture);
 	CHECK_OGL_ERRORS();
@@ -712,9 +1010,12 @@ uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,boo
 	const int oldStride = pWidth * 4;
 
 	// Extract the information
-	NinePatch newNinePatch;
+	Vec2Ds scaleFrom = {-1,-1};
+	Vec2Ds scaleTo = {-1,-1};
+	Vec2Ds fillFrom = {-1,-1};
+	Vec2Ds fillTo = {-1,-1};
 
-	auto ScanNinePatch = [](uint8_t pPixel,int pIndex,int &pFrom,int &pTo,const std::string& pWhat)
+	auto ScanNinePatch = [](uint8_t pPixel,int16_t pIndex,int16_t &pFrom,int16_t &pTo,const std::string& pWhat)
 	{
 		if( pPixel == 0xff )
 		{	// Record first hit of solid.
@@ -741,8 +1042,8 @@ uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,boo
 	const uint8_t* lastRow = pPixels + (oldStride * (pHeight-1)) + 3;
 	for( int x = 0 ; x < pWidth ; x++ )
 	{
-		ScanNinePatch(firstRow[x*4],x,newNinePatch.mScalable.from.x,newNinePatch.mScalable.to.x,"Scalable X");
-		ScanNinePatch(lastRow[x*4],x,newNinePatch.mFillable.from.x,newNinePatch.mFillable.to.x,"Fillable X");
+		ScanNinePatch(firstRow[x*4],x,scaleFrom.x,scaleTo.x,"Scalable X");
+		ScanNinePatch(lastRow[x*4],x,fillFrom.x,fillTo.x,"Fillable X");
 	}
 
 	// Scan to for scale and X fill start
@@ -750,47 +1051,26 @@ uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,boo
 	const uint8_t* lastColumn = pPixels + ((pWidth-1)*4) + 3;
 	for( int y = 0 ; y < pHeight ; y++ )
 	{
-		ScanNinePatch(firstColumn[y * oldStride],y,newNinePatch.mScalable.from.y,newNinePatch.mScalable.to.y,"Scalable Y");
-		ScanNinePatch(lastColumn[y * oldStride],y,newNinePatch.mFillable.from.y,newNinePatch.mFillable.to.y,"Fillable Y");
+		ScanNinePatch(firstColumn[y * oldStride],y,scaleFrom.y,scaleTo.y,"Scalable Y");
+		ScanNinePatch(lastColumn[y * oldStride],y,fillFrom.y,fillTo.y,"Fillable Y");
 	}
 
-	// Did we get it all?
-	if( newNinePatch.GetOK() == false )
+	if( scaleFrom.x == -1 || scaleFrom.y == -1 || scaleTo.x == -1 || scaleTo.y == -1 || 
+		fillFrom.x  == -1 || fillFrom.y  == -1 || fillTo.x  == -1 || fillTo.y  == -1 )
 	{
 		if( mVerbose )
 		{
 			std::clog << "Nine patch failure,\n";
-			std::clog << "   Scalable X " << newNinePatch.mScalable.from.x << " " << newNinePatch.mScalable.to.x << "\n";
-			std::clog << "   Scalable Y " << newNinePatch.mScalable.from.y << " " << newNinePatch.mScalable.to.y << "\n";
-			std::clog << "   Fillable X " << newNinePatch.mFillable.from.x << " " << newNinePatch.mFillable.to.x << "\n";
-			std::clog << "   Fillable Y " << newNinePatch.mFillable.from.y << " " << newNinePatch.mFillable.to.y << "\n";
+			std::clog << "   Scalable X " << scaleFrom.x << " " << scaleTo.x << "\n";
+			std::clog << "   Scalable Y " << scaleFrom.y << " " << scaleTo.y << "\n";
+			std::clog << "   Fillable X " << fillFrom.x << " " << fillTo.x << "\n";
+			std::clog << "   Fillable Y " << fillFrom.y << " " << fillTo.y << "\n";
 		}
 		THROW_MEANINGFUL_EXCEPTION("Nine patch edge definition invlaid, not all scaling and filling information found. Is it a nine patch texture?");
 	}
 
-	// Now build the verts, that are zero offset, when we render we'll add x and y to them and scale.
-	int k = 0;
-	const std::array<int,4>YCords = {0,newNinePatch.mScalable.from.y,newNinePatch.mScalable.to.y,newHeight};
-	for( int y : YCords )
-	{
-		int n = 0;
-		const std::array<int,4>XCords = {0,newNinePatch.mScalable.from.x,newNinePatch.mScalable.to.x,newWidth};
-		for( int x : XCords )
-		{
-			newNinePatch.mVerts[n][k].x = x;
-			newNinePatch.mVerts[n][k].y = y;
-
-			// Not happy with why I had to swap these around but not for the verts. I need to investigate at some point. Could be to do with the normalization flag.
-			newNinePatch.mUVs[k][n].x = (0x7fff * x) / newWidth;
-			newNinePatch.mUVs[k][n].y = (0x7fff * y) / newHeight;
-			n++;
-		}
-		k++;
-	}
-
-
 	// Remove the outer edge from pixel data
-	uint8_t* newPixels = mWorkBuffers.scratchRam.Restart( newWidth * newHeight * 4 );
+	uint8_t* newPixels = mWorkBuffers->scratchRam.Restart( newWidth * newHeight * 4 );
 	uint8_t* dst = newPixels;
 	const uint8_t* src = pPixels + oldStride + 4;
 	for( int y = 1 ; y < pHeight-1 ; y++ )
@@ -813,7 +1093,7 @@ uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,boo
 	}
 
 	// Create the nine patch entry and return.
-	mNinePatchs[newTexture] = newNinePatch;
+	mNinePatchs[newTexture] = std::make_unique<NinePatch>(newWidth,newHeight,scaleFrom,scaleTo,fillFrom,fillTo);
 
 	return newTexture;
 }
@@ -842,32 +1122,32 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 	{
 		THROW_MEANINGFUL_EXCEPTION("An attempt to draw a nine patch that is not a nine patch was made");
 	}
-	const NinePatch& ninePinch = found->second;
+	const auto& ninePinch = found->second.get();
 
 	// We have to draw 9 rects, with the center scaling the texture.
-	const int xMove = pX + ((ninePinch.mScalable.to.x - ninePinch.mScalable.from.x) * pXScale);
-	const int yMove = pY + ((ninePinch.mScalable.to.y - ninePinch.mScalable.from.y) * pYScale);
-	Vec2Ds* verts = mWorkBuffers.vec2Ds.Restart(16);
+	const int xMove = pX + ((ninePinch->mScalable.to.x - ninePinch->mScalable.from.x) * pXScale);
+	const int yMove = pY + ((ninePinch->mScalable.to.y - ninePinch->mScalable.from.y) * pYScale);
+	Vec2Ds* verts = mWorkBuffers->vec2Ds.Restart(16);
 	for( int y = 0 ; y < 4 ; y++ )
 	{
 		for( int x = 0 ; x < 4 ; x++, verts++ )
 		{
 			if( x < 2 )
 			{
-				verts->x = ninePinch.mVerts[x][y].x + pX;
+				verts->x = ninePinch->mVerts[x][y].x + pX;
 			}
 			else
 			{
-				verts->x = ninePinch.mVerts[x][y].x + xMove;
+				verts->x = ninePinch->mVerts[x][y].x + xMove;
 			}
 
 			if( y < 2 )
 			{
-				verts->y = ninePinch.mVerts[x][y].y + pY;
+				verts->y = ninePinch->mVerts[x][y].y + pY;
 			}
 			else
 			{
-				verts->y = ninePinch.mVerts[x][y].y + yMove;
+				verts->y = ninePinch->mVerts[x][y].y + yMove;
 			}
 		}
 	}
@@ -880,7 +1160,7 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 				2,
 				GL_SHORT,
 				GL_TRUE,
-				4,ninePinch.mUVs);
+				4,ninePinch->mUVs);
 	CHECK_OGL_ERRORS();
 
 	static const uint8_t indices[9*6] =
@@ -898,7 +1178,7 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 		10,11,15,10,15,14		
 	};
 
-	VertexPtr(2,GL_SHORT,4,mWorkBuffers.vec2Ds.Data());
+	VertexPtr(2,GL_SHORT,4,mWorkBuffers->vec2Ds.Data());
 	glDrawElements(GL_TRIANGLES,9*6,GL_UNSIGNED_BYTE,indices);
 	CHECK_OGL_ERRORS();
 
@@ -912,13 +1192,13 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 void GLES::FontPrint(int pX,int pY,const char* pText)
 {
 	const std::string_view s(pText);
-	mWorkBuffers.vec2Ds.Restart();
-	mWorkBuffers.uvShort.Restart();
+	mWorkBuffers->vec2Ds.Restart();
+	mWorkBuffers->uvShort.Restart();
 
 	// Get where the uvs will be written too.
 	const int quadSize = 16 * mPixelFont.scale;
 	const int squishHack = 3 * mPixelFont.scale;
-	mWorkBuffers.vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,s.size(),quadSize - squishHack,0);
+	mWorkBuffers->vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,s.size(),quadSize - squishHack,0);
 
 	// Get where the uvs will be written too.
 	const int maxUV = 32767;
@@ -927,24 +1207,24 @@ void GLES::FontPrint(int pX,int pY,const char* pText)
 	{
 		const int x = ((int)c&0x0f) * charSize;
 		const int y = ((int)c>>4) * charSize;
-		mWorkBuffers.uvShort.BuildQuad(x+64,y+64,charSize-128,charSize-128);// The +- 64 is because of filtering. Makes font look nice at normal size.
+		mWorkBuffers->uvShort.BuildQuad(x+64,y+64,charSize-128,charSize-128);// The +- 64 is because of filtering. Makes font look nice at normal size.
 	}
 
 	// Continue adding uvs to the buffer after the verts.
 	EnableShader(mShaders.TextureAlphaOnly,mPixelFont.texture,mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
 
 	// how many?
-	const int numVerts = mWorkBuffers.vec2Ds.Used();
+	const int numVerts = mWorkBuffers->vec2Ds.Used();
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TEXCOORD,
 				2,
 				GL_SHORT,
 				GL_TRUE,
-				4,mWorkBuffers.uvShort.Data());
+				4,mWorkBuffers->uvShort.Data());
 	CHECK_OGL_ERRORS();
 
-	VertexPtr(2,GL_SHORT,4,mWorkBuffers.vec2Ds.Data());
+	VertexPtr(2,GL_SHORT,4,mWorkBuffers->vec2Ds.Data());
 	CHECK_OGL_ERRORS();
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
 	CHECK_OGL_ERRORS();
@@ -1042,8 +1322,8 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 {
 	auto& font = mFreeTypeFonts.at(pFont);
 
-	mWorkBuffers.vec2Ds.Restart();
-	mWorkBuffers.uvShort.Restart();
+	mWorkBuffers->vec2Ds.Restart();
+	mWorkBuffers->uvShort.Restart();
 
 	// Get where the uvs will be written too.
 	for( auto c : pText )
@@ -1052,9 +1332,9 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 		{
 			auto&g = font->mGlyphs.at(c-32);
 
-			mWorkBuffers.vec2Ds.BuildQuad(pX + g.x_off,pY + g.y_off,g.width,g.height);
+			mWorkBuffers->vec2Ds.BuildQuad(pX + g.x_off,pY + g.y_off,g.width,g.height);
 
-			mWorkBuffers.uvShort.AddUVRect(
+			mWorkBuffers->uvShort.AddUVRect(
 					g.uv[0].x,
 					g.uv[0].y,
 					g.uv[1].x,
@@ -1072,16 +1352,16 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 	EnableShader(mShaders.TextureAlphaOnly,font->mTexture,font->mColour.R,font->mColour.G,font->mColour.B,font->mColour.A);
 
 	// how many?
-	const int numVerts = mWorkBuffers.vec2Ds.Used();
+	const int numVerts = mWorkBuffers->vec2Ds.Used();
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TEXCOORD,
 				2,
 				GL_SHORT,
 				GL_TRUE,
-				4,mWorkBuffers.uvShort.Data());
+				4,mWorkBuffers->uvShort.Data());
 
-	VertexPtr(2,GL_SHORT,4,mWorkBuffers.vec2Ds.Data());
+	VertexPtr(2,GL_SHORT,4,mWorkBuffers->vec2Ds.Data());
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
 	CHECK_OGL_ERRORS();
 }
@@ -1133,10 +1413,7 @@ int GLES::FontGetPrintfWidth(uint32_t pFont,const char* pFmt,...)
 void GLES::ProcessSystemEvents()
 {
 #ifdef PLATFORM_X11_GL
-	if( mNativeWindow )
-	{
-		mCTRL_C_Pressed = mNativeWindow->ProcessX11Events(mSystemEventHandler);
-	}
+	mCTRL_C_Pressed = mPlatform->ProcessX11Events(mSystemEventHandler);
 #endif
 
 	// We don't bother to read the mouse if no pEventHandler has been registered. Would be a waste of time.
@@ -1233,27 +1510,27 @@ void GLES::InitialiseDisplay()
 
 #ifdef PLATFORM_GLES
 	VERBOSE_MESSAGE("Calling eglGetDisplay");
-	mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-	if( !mDisplay )
+	mPlatform->mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+	if( !mPlatform->mDisplay )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
 	}
 
 	//Now we have a display lets initialize it.
-	if( !eglInitialize(mDisplay, &mMajorVersion, &mMinorVersion) )
+    EGLint majorVersion,minorVersion;
+	if( !eglInitialize(mPlatform->mDisplay, &majorVersion, &minorVersion) )
 	{
 		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
 	}
 	CHECK_OGL_ERRORS();
-	VERBOSE_MESSAGE("GLES version " << mMajorVersion << "." << mMinorVersion);
+	VERBOSE_MESSAGE("GLES version " << majorVersion << "." << minorVersion);
 	eglBindAPI(EGL_OPENGL_ES_API);
 	CHECK_OGL_ERRORS();
 #endif //#ifdef PLATFORM_GLES
 
 #ifdef PLATFORM_X11_GL
-	mNativeWindow = new X11GLEmulation(mVerbose);
+	mPlatform->Create();
 #endif
-
 }
 
 void GLES::FindGLESConfiguration()
@@ -1276,7 +1553,7 @@ void GLES::FindGLESConfiguration()
 		};
 
 		EGLint numConfigs;
-		if( !eglChooseConfig(mDisplay,attrib_list,&mConfig,1, &numConfigs) )
+		if( !eglChooseConfig(mPlatform->mDisplay,attrib_list,&mPlatform->mConfig,1, &numConfigs) )
 		{
 			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
 		}
@@ -1285,15 +1562,15 @@ void GLES::FindGLESConfiguration()
 		{
 			EGLint bufSize,r,g,b,a,z,s = 0;
 
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_BUFFER_SIZE,&bufSize);
+			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_BUFFER_SIZE,&bufSize);
 
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_RED_SIZE,&r);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_GREEN_SIZE,&g);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_BLUE_SIZE,&b);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_ALPHA_SIZE,&a);
+			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_RED_SIZE,&r);
+			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_GREEN_SIZE,&g);
+			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_BLUE_SIZE,&b);
+			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_ALPHA_SIZE,&a);
 
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_DEPTH_SIZE,&z);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_STENCIL_SIZE,&s);
+			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_DEPTH_SIZE,&z);
+			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_STENCIL_SIZE,&s);
 
 			CHECK_OGL_ERRORS();
 
@@ -1315,8 +1592,8 @@ void GLES::CreateRenderingContext()
 	//We have our display and have chosen the config so now we are ready to create the rendering context.
 	VERBOSE_MESSAGE("Creating context");
 	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
-	mContext = eglCreateContext(mDisplay,mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
-	if( !mContext )
+	mPlatform->mContext = eglCreateContext(mPlatform->mDisplay,mPlatform->mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
+	if( !mPlatform->mContext )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
 	}
@@ -1348,27 +1625,27 @@ void GLES::CreateRenderingContext()
 			nullptr,nullptr,
 			DISPMANX_NO_ROTATE);
 
-	mNativeWindow.element = dispman_element;
-	mNativeWindow.width = mWidth;
-	mNativeWindow.height = mHeight;
+	mPlatform->mNativeWindow.element = dispman_element;
+	mPlatform->mNativeWindow.width = mWidth;
+	mPlatform->mNativeWindow.height = mHeight;
 	vc_dispmanx_update_submit_sync( dispman_update );
-	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
+	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,&mPlatform->mNativeWindow,0);
 #else
-	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
+	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,mPlatform->mNativeWindow,0);
 #endif //BROADCOM_NATIVE_WINDOW
 
 
 	CHECK_OGL_ERRORS();
-	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
-	eglQuerySurface(mDisplay, mSurface,EGL_WIDTH,  &mWidth);
-	eglQuerySurface(mDisplay, mSurface,EGL_HEIGHT, &mHeight);
+	eglMakeCurrent(mPlatform->mDisplay, mPlatform->mSurface, mPlatform->mSurface, mPlatform->mContext );
+	eglQuerySurface(mPlatform->mDisplay, mPlatform->mSurface,EGL_WIDTH,  &mWidth);
+	eglQuerySurface(mPlatform->mDisplay, mPlatform->mSurface,EGL_HEIGHT, &mHeight);
 	CHECK_OGL_ERRORS();
 #endif //#ifdef PLATFORM_GLES
 }
 
 void GLES::SetRenderingDefaults()
 {
-	eglSwapInterval(mDisplay,1);
+	eglSwapInterval(mPlatform->mDisplay,1);
 	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
 
 	glViewport(0, 0, (GLsizei)mWidth, (GLsizei)mHeight);
@@ -1485,7 +1762,7 @@ void GLES::SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,u
 	TinyShader aShader = mShaders.ColourOnly;
 	if( pTexture > 0 )
 	{
-		if( mTextures.at(pTexture).mFormat == TextureFormat::FORMAT_ALPHA )
+		if( mTextures.at(pTexture)->mFormat == TextureFormat::FORMAT_ALPHA )
 		{
 			aShader = mShaders.TextureAlphaOnly;
 		}
@@ -1564,7 +1841,7 @@ void GLES::BuildDebugTexture()
 void GLES::BuildPixelFontTexture()
 {
 	// This is alpha 4bits per pixel data. So we need to pad it out.
-	uint8_t* pixels = mWorkBuffers.scratchRam.Restart(256*256);
+	uint8_t* pixels = mWorkBuffers->scratchRam.Restart(256*256);
 	int n = 0;
 	for( auto dword : mFont16x16Data )
 	{
@@ -1595,39 +1872,39 @@ void GLES::InitFreeTypeFont()
 #endif
 }
 
-void GLES::VertexPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer)
+void GLES::VertexPtr(int pNum_coord, uint32_t pType, int pStride,const void* pPointer)
 {
 	if(pNum_coord < 2 || pNum_coord > 3)
 	{
 		THROW_MEANINGFUL_EXCEPTION("VertexPtr passed invalid value for pNum_coord, must be 2 or 3 got " + std::to_string(pNum_coord));
 	}
 
-	return SetUserSpaceStreamPtr(StreamIndex::VERTEX,pNum_coord,pType,pStride,pPointer);
+	return SetUserSpaceStreamPtr((GLuint)StreamIndex::VERTEX,pNum_coord,pType,pStride,pPointer);
 }
 
-void GLES::TexCoordPtr(GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer)
+void GLES::TexCoordPtr(int pNum_coord, uint32_t pType, int pStride,const void* pPointer)
 {
-	return SetUserSpaceStreamPtr(StreamIndex::TEXCOORD,pNum_coord,pType,pStride,pPointer);
+	return SetUserSpaceStreamPtr((GLuint)StreamIndex::TEXCOORD,pNum_coord,pType,pStride,pPointer);
 }
 
-void GLES::ColourPtr(GLint pNum_coord, GLsizei pStride,const uint8_t* pPointer)
+void GLES::ColourPtr(int pNum_coord, int pStride,const uint8_t* pPointer)
 {
 	if(pNum_coord < 3 || pNum_coord > 4)
 	{
 		THROW_MEANINGFUL_EXCEPTION("ColourPtr passed invalid value for pNum_coord, must be 3 or 4 got " + std::to_string(pNum_coord));
 	}
 
-	return SetUserSpaceStreamPtr(StreamIndex::COLOUR,pNum_coord,GL_BYTE,pStride,pPointer);
+	return SetUserSpaceStreamPtr((GLuint)StreamIndex::COLOUR,pNum_coord,GL_BYTE,pStride,pPointer);
 }
 
-void GLES::SetUserSpaceStreamPtr(StreamIndex pStream,GLint pNum_coord, GLenum pType, GLsizei pStride,const void* pPointer)
+void GLES::SetUserSpaceStreamPtr(uint32_t pStream,GLint pNum_coord, uint32_t pType, int pStride,const void* pPointer)
 {
 	if( pStride == 0 )
 	{
 		THROW_MEANINGFUL_EXCEPTION("SetUserSpaceStreamPtr passed invalid value for pStride, must be > 0 ");
 	}
 
-	if( pStream != StreamIndex::VERTEX && pStream != StreamIndex::TEXCOORD && pStream != StreamIndex::COLOUR  )
+	if( pStream != (GLuint)StreamIndex::VERTEX && pStream != (GLuint)StreamIndex::TEXCOORD && pStream != (GLuint)StreamIndex::COLOUR  )
 	{
 		THROW_MEANINGFUL_EXCEPTION("SetUserSpaceStreamPtr passed invlaid stream index " + std::to_string((int)pStream));
 	}
@@ -1770,20 +2047,20 @@ void GLShader::BindAttribLocation(int location,const char* pName)
 	VERBOSE_MESSAGE("Shader: " << mName << " AttribLocation("<< pName << "," << location << ")");
 }
 
-void GLShader::Enable(const Matrix4x4& projInvcam)
+void GLShader::Enable(const float projInvcam[4][4])
 {
 //	VERBOSE_MESSAGE("shader: " << mName << " Enabling shader " << mShader );
 	assert(mShader);
     glUseProgram(mShader);
     CHECK_OGL_ERRORS();
 
-    glUniformMatrix4fv(mUniforms.proj_cam, 1, false,(const float*)projInvcam.m);
+    glUniformMatrix4fv(mUniforms.proj_cam, 1, false,(const float*)projInvcam);
     CHECK_OGL_ERRORS();
 }
 
-void GLShader::SetTransform(Matrix4x4& transform)
+void GLShader::SetTransform(float transform[4][4])
 {
-	glUniformMatrix4fv(mUniforms.trans, 1, false,(const GLfloat*)transform.m);
+	glUniformMatrix4fv(mUniforms.trans, 1, false,(const GLfloat*)transform);
 	CHECK_OGL_ERRORS();
 }
 
@@ -2167,11 +2444,32 @@ void FreeTypeFont::BuildTexture(
 /**
  * @brief The TinyGLES codebase is expected to be used for a system not running X11. But to aid development there is an option to 'emulate' a frame buffer with an X11 window.
  */
-X11GLEmulation::X11GLEmulation(bool pVerbose):
+PlatformInterface::PlatformInterface(bool pVerbose):
 	mVerbose(pVerbose),
 	mXDisplay(NULL),
 	mWindow(0),
 	mWindowReady(false)
+{
+
+}
+
+PlatformInterface::~PlatformInterface()
+{
+	VERBOSE_MESSAGE("Cleaning up GL");
+	mWindowReady = false;
+
+	glXMakeCurrent(mXDisplay, 0, 0 );
+	glXDestroyContext(mXDisplay,mGLXContext);
+
+	// Do this after we have set the message pump flag to false so the events generated will case XNextEvent to return.
+	XFree(mVisualInfo);
+	XFreeColormap(mXDisplay,mWindowAttributes.colormap);
+	XDestroyWindow(mXDisplay,mWindow);
+	XCloseDisplay(mXDisplay);
+	mXDisplay = nullptr;
+}
+
+void PlatformInterface::Create()
 {
 	VERBOSE_MESSAGE("Making X11 window for GLES emulation");
 
@@ -2263,23 +2561,7 @@ X11GLEmulation::X11GLEmulation(bool pVerbose):
 	}
 }
 
-X11GLEmulation::~X11GLEmulation()
-{
-	VERBOSE_MESSAGE("Cleaning up GL");
-	mWindowReady = false;
-
-	glXMakeCurrent(mXDisplay, 0, 0 );
-	glXDestroyContext(mXDisplay,mGLXContext);
-
-	// Do this after we have set the message pump flag to false so the events generated will case XNextEvent to return.
-	XFree(mVisualInfo);
-	XFreeColormap(mXDisplay,mWindowAttributes.colormap);
-	XDestroyWindow(mXDisplay,mWindow);
-	XCloseDisplay(mXDisplay);
-	mXDisplay = nullptr;
-}
-
-bool X11GLEmulation::ProcessX11Events(tinygles::GLES::SystemEventHandler pEventHandler)
+bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEventHandler)
 {
 	// The message pump had to be moved to the same thread as the rendering because otherwise it would fail after a little bit of time.
 	// This is dispite what the documentation stated.
@@ -2356,7 +2638,7 @@ bool X11GLEmulation::ProcessX11Events(tinygles::GLES::SystemEventHandler pEventH
 	return false;
 }
 
-void X11GLEmulation::RedrawWindow()
+void PlatformInterface::RedrawWindow()
 {
 	assert( mWindowReady );
 	if( mXDisplay == nullptr )

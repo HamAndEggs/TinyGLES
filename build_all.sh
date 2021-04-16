@@ -5,7 +5,8 @@ PROJECTS=(
     "./examples/PixelFont/"
     "./examples/Texture/"
     "./examples/TextureUpdating/"
-    "./examples/TrueTypeFont/"
+    "./examples/FreeTypeFont/"
+    "./examples/NinePatch/"
 )
 
 for t in ${PROJECTS[@]}; do
