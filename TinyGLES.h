@@ -65,6 +65,26 @@
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+constexpr float GetPI()
+{
+	return std::acos(-1);
+}
+
+constexpr float GetRadian()
+{
+	return 2.0f * GetPI();
+}
+
+constexpr float DegreeToRadian(float pDegree)
+{
+	return pDegree * (GetPI()/180.0f);
+}
+
+constexpr float ColourToFloat(uint8_t pColour)
+{
+	return (float)pColour / 255.0f;
+}
+
 /**
  * @brief The different type of events that the application can respond to.
  * See setSystemEventHandler function in GLES class.
@@ -118,6 +138,7 @@ struct GLTexture;			//!< Because we can't query the values used to create a gl t
 struct NinePatch;			//!< Internal data used to draw the nine patch objects.
 struct WorkBuffers;			//!< Internal work buffers for building temporay render data.
 struct PlatformInterface;	//!< Abstraction of the rendering platform we use to get the work done.
+struct Sprite;				//!< The sprite object. Defined in the source code, only need a forward definition here.
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -214,6 +235,12 @@ public:
 	 */
 	void SetFrustum3D(float pFov, float pAspect, float pNear, float pFar);
 
+	void SetTransform(float transform[4][4]);
+	void SetTransform(float x,float y,float z);
+	void SetTransformIdentity();
+
+	void SetTransform2D(float pX,float pY,float pRotation,float pScale);
+
 	/**
 	 * @brief Sets the flag for the main loop to false and fires the SYSTEM_EVENT_EXIT_REQUEST
 	 * You would typically call this from a UI button to quit the app.
@@ -268,7 +295,44 @@ public:
 	void Blit(uint32_t pTexture,int pX,int pY,uint8_t pRed = 255,uint8_t pGreen = 255,uint8_t pBlue = 255,uint8_t pAlpha = 255);
 
 //*******************************************
-// Texture commands.
+// Sprite functions
+
+	/**
+	 * @brief Create a sprite object, size and center is not related to the same size of the texture. pCX and pCY defines the center of rotation and position.
+	 * The size of the sprite, in pixels.
+	 * The center of the sprite, in pixels, from the top left of the quad that renders it.	 Uses a float as it allows sub pixel centers. Which can be handy.
+	 * pTex* params defines the rectangle of the texture that is mapped to the sprite.
+	 * @return uint32_t The handle of the sprite object.
+	 */
+	uint32_t SpriteCreate(uint32_t pTexture,float pWidth,float pHeight,float pCX,float pCY,int pTexFromX,int pTexFromY,int pTexToX,int pTexToY);
+
+	/**
+	 * @brief Util function, same as above but also uses the texture as the size of the sprite and centers at the center of the sprite.
+	 */
+	uint32_t SpriteCreate(uint32_t pTexture,float pWidth,float pHeight,float pCX,float pCY);
+
+	/**
+	 * @brief Util function, same as above but sets the UV's to use all of the texture.
+	 */
+	uint32_t SpriteCreate(uint32_t pTexture);
+
+	/**
+	 * @brief deletes the sprite
+	 */
+	void SpriteDelete(uint32_t pSprite);
+
+	/**
+	 * @brief Draws the sprite using the current transform to position, scale and rotate it. Witch is the whole point.
+	 */
+	void SpriteDraw(uint32_t pSprite);
+
+	/**
+	 * @brief Sets the center position of an existing sprite
+	 */
+	void SpriteSetCenter(uint32_t pSprite,float pCX,float pCY);
+
+//*******************************************
+// Texture functions
 	/**
 	 * @brief Create a Texture object with the size passed in and a given name. 
 	 * pPixels is either RGB format 24bit or RGBA 32bit format is pHasAlpha is true.
@@ -288,6 +352,17 @@ public:
 	 * All textures are deleted when the GLES context is torn down so you only need to use this if you need to reclaim some memory.
 	 */
 	void DeleteTexture(uint32_t pTexture);
+
+	/**
+	 * @brief Gets the width of the texture. Not recommended that this is called 1000's of times in a frame as it has to search a std::map for the object.
+	 */
+	int GetTextureWidth(uint32_t pTexture)const;
+
+
+	/**
+	 * @brief Gets the height of the texture. Not recommended that this is called 1000's of times in a frame as it has to search a std::map for the object.
+	 */
+	int GetTextureHeight(uint32_t pTexture)const;
 
 	/**
 	 * @brief Get the diagnostics texture for use to help with finding issues.
@@ -399,9 +474,9 @@ private:
 	void SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha);
 
 	/**
-	 * @brief If the shader is already active, only it's vars are updated. Else it it is enabled. Depending on platform you want to minimise the chaning of the shader used.
+	 * @brief If the shader is already active, only it's vars are updated. Else it it is enabled. Depending on platform you want to minimise the changing of the shader used.
 	 */
-	void EnableShader(TinyShader pShader,uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha);
+	void EnableShader(TinyShader pShader);
 
 	void BuildDebugTexture();
 	void BuildPixelFontTexture();
@@ -424,6 +499,9 @@ private:
 	std::map<uint32_t,std::unique_ptr<GLTexture>> mTextures; 	//!< Our textures. I reuse the GL texture index (handle) for my own. A handy value and works well.
 	std::map<uint32_t,std::unique_ptr<NinePatch>> mNinePatchs;	//!< Our nine patch data, image data is also into the textures map. I reuse the GL texture index (handle) for my own. A handy value and works well.
 	NinePatchDrawInfo mNinePatchDrawInfo;						//!< Temporary buffer used to pass back rending information to the caller of the DrawNinePatch so they can draw in the safe area.
+
+	std::map<uint32_t,std::unique_ptr<Sprite>> mSprites;		//!< Our sprites. Allows for easier rending with more functionality without functions that have a thousand paramiters.
+	uint32_t mNextSpriteIndex = 1;								//!< The next sprite index to use when a sprite is allocated.
 
 	/**
 	 * @brief Some data used for diagnostics/
@@ -465,6 +543,7 @@ private:
 		TinyShader ColourOnly;
 		TinyShader TextureColour;
 		TinyShader TextureAlphaOnly;
+		TinyShader SpriteShader;
 
 		TinyShader CurrentShader;
 	}mShaders;
@@ -472,6 +551,7 @@ private:
 	struct
 	{
 		float projection[4][4];
+		float transform[4][4];
 	}mMatrices;
 
 #ifdef USE_FREETYPEFONTS

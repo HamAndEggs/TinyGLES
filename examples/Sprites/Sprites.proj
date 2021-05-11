@@ -1,0 +1,90 @@
+{
+    "source_files": [
+        "Sprites.cpp",
+        "../SupportCode/TinyPNG.cpp",
+        "../../TinyGLES.cpp"
+    ],
+   "configurations":
+    {
+        "bcm_host-GLES-debug":
+        {
+            "default": true,
+            "enable_all_warnings": false,
+            "standard": "c++17",
+            "include":
+            [
+                "/opt/vc/include/",
+                "../.."
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "brcmGLESv2",
+                "brcmEGL",
+                "bcm_host",
+                "z"
+            ],
+            "libpaths":
+            [
+                "/opt/vc/lib"
+            ],
+            "define": [
+                "DEBUG_BUILD",
+                "BROADCOM_NATIVE_WINDOW",
+                "PLATFORM_GLES"
+            ]
+        },
+        "GLES-debug":
+        {
+            "default": false,
+            "enable_all_warnings": false,
+            "standard": "c++17",
+            "include":
+            [
+                "../.."
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "GLESv2",
+                "EGL",
+                "z"
+            ],
+            "define": [
+                "DEBUG_BUILD",
+                "PLATFORM_GLES"
+            ]
+        },
+        "X11-debug":
+        {
+            "default": false,
+            "enable_all_warnings": true,
+            "warnings_as_errors": false,
+            "standard": "c++17",
+            "optimisation": "0",
+            "debug_level": "2",
+            "include":
+            [
+                "../.."
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "GL",
+                "X11",
+                "z"
+            ],
+            "define": [
+                "DEBUG_BUILD",
+                "PLATFORM_X11_GL"
+            ]
+        }
+    },
+    "version": "0.0.1"
+}
