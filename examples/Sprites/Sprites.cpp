@@ -108,9 +108,13 @@ int main(int argc, char *argv[])
     uint32_t Bird_by_Magnus = LoadTexture(GL,"../data/Bird_by_Magnus.png");
     uint32_t ball = LoadTexture(GL,"../data/foot-ball2.png");
     uint32_t tree = LoadTexture(GL,"../data/tree.png");
-    uint32_t ballSprite = GL.SpriteCreate(ball);
+    uint32_t Dial = LoadTexture(GL,"../data/Dial.png");
+    uint32_t Needle = LoadTexture(GL,"../data/Needle.png");
 
-    std::array<ABall,200> balls;
+    uint32_t ballSprite = GL.SpriteCreate(ball);
+    uint32_t NeedleSprite = GL.SpriteCreate(Needle,16,64,8,80);
+
+    std::array<ABall,20> balls;
 
     int anim = 0;
     std::cout << "Starting render loop\n";
@@ -126,6 +130,17 @@ int main(int argc, char *argv[])
         }
 
         GL.FillRectangle(0,GL.GetHeight()-400,256,GL.GetHeight(),tree);
+
+        const int DialX = GL.GetWidth()-256;
+        const int DialY = 0;
+        const float a = anim;
+        const float r = tinygles::DegreeToRadian(125.3f * std::sin(a * 0.01f));
+
+        GL.Blit(Dial,DialX,DialY);
+
+        GL.SetTransform2D(DialX+128,DialY+128,r,1.3f);
+        GL.SpriteDraw(NeedleSprite);
+
 
         GL.EndFrame();
 
