@@ -131,6 +131,32 @@ enum struct TextureFormat
 	FORMAT_ALPHA
 };
 
+struct SpriteBatchTransform
+{
+	// We have to have four because of how we draw quads.
+	// This is because GLES 2.0 does not have a quad primitive or have instance rendering.
+	// When I support more higher API's I can adjust how this works to get full speed on these systems.
+	// For now, just make it work.
+	inline void SetTransform(float pX,float pY,float pRotation,float pScale)
+	{
+		for( int n = 0 ; n < 4 ; n++ )
+		{
+			trans[n].x = pX;
+			trans[n].y = pY;
+			trans[n].r = pRotation;
+			trans[n].s = pScale;
+		}
+	}
+
+	struct
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		float r = 0.0f;	//!< Rotation in radians
+		float s = 1.0f; //!< Scale.
+	}trans[4];
+};
+
 // Forward decleration of internal types.
 typedef std::shared_ptr<struct GLShader> TinyShader;
 struct FreeTypeFont;
@@ -139,6 +165,7 @@ struct NinePatch;			//!< Internal data used to draw the nine patch objects.
 struct WorkBuffers;			//!< Internal work buffers for building temporay render data.
 struct PlatformInterface;	//!< Abstraction of the rendering platform we use to get the work done.
 struct Sprite;				//!< The sprite object. Defined in the source code, only need a forward definition here.
+struct SpriteBatch;			//!< The sprite batch object. Defined in the source code, only need a forward definition here.
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -331,6 +358,48 @@ public:
 	 */
 	void SpriteSetCenter(uint32_t pSprite,float pCX,float pCY);
 
+	/**
+	 * @brief creates a list of the same sprite configuration that will allow many to be drawn in one function draw for much faster speed.
+	 * The transform, rotation and scale is uploaded in a separate data stream. Poor mans instancing as it's not available in the lower end systems we support.
+	 * Texture has to be the same for all, no way of making that different per sprite.
+	 */
+	uint32_t SpriteBatchCreate(uint32_t pTexture,int pCount,float pWidth,float pHeight,float pCX,float pCY,int pTexFromX,int pTexFromY,int pTexToX,int pTexToY);
+
+	/**
+	 * @brief Util function, same as above but also uses the texture as the size of the sprite and centers at the center of the sprite.
+	 */
+	uint32_t SpriteBatchCreate(uint32_t pTexture,int pCount,float pWidth,float pHeight,float pCX,float pCY);
+
+	/**
+	 * @brief Util function, same as above but sets the UV's to use all of the texture and sprite size to size of texture.
+	 */
+	uint32_t SpriteBatchCreate(uint32_t pTexture,int pCount);
+
+	/**
+	 * @brief Deletes the sprite batch.
+	 */
+	void SpriteBatchDelete(uint32_t pSpriteBatch);
+
+	/**
+	 * @brief Draws all the sprites, expects that all their transforms will have been set.
+	 */
+	void SpriteBatchDraw(uint32_t pSpriteBatch);
+
+	/**
+	 * @brief Draws the sprites within the range specified, expects that their transforms will have been set.
+	 */
+	void SpriteBatchDraw(uint32_t pSpriteBatch,int pFromIndex,int pToIndex);
+
+	/**
+	 * @brief Sets the transform for the sprite at index for the sprite batch.
+	 */
+	void SpriteBatchSetTransform(uint32_t pSpriteBatch,int pIndex,float pX,float pY,float pRotation,float pScale);
+
+	/**
+	 * @brief Because calling the above could be expensive for a lot of sprites this function allows you to do it more directly.
+	 */
+	std::vector<SpriteBatchTransform>& SpriteBatchGetTransform(uint32_t pSpriteBatch);
+
 //*******************************************
 // Texture functions
 	/**
@@ -482,10 +551,10 @@ private:
 	void BuildPixelFontTexture();
 	void InitFreeTypeFont();
 
-	void VertexPtr(int pNum_coord, uint32_t pType, int pStride,const void* pPointer);
-	void TexCoordPtr(int pNum_coord, uint32_t pType, int pStride,const void* pPointer);
-	void ColourPtr(int pNum_coord, int pStride,const uint8_t* pPointer);
-	void SetUserSpaceStreamPtr(uint32_t pStream,int pNum_coord, uint32_t pType, int pStride,const void* pPointer);
+	void VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer);
+	void TexCoordPtr(int pNum_coord, uint32_t pType,const void* pPointer);
+	void ColourPtr(int pNum_coord,const uint8_t* pPointer);
+	void SetUserSpaceStreamPtr(uint32_t pStream,int pNum_coord, uint32_t pType,const void* pPointer);
 
 	const bool mVerbose;
 	bool mKeepGoing = true;								//!< Set to false by the application requesting to exit or the user doing ctrl + c.
@@ -502,6 +571,13 @@ private:
 
 	std::map<uint32_t,std::unique_ptr<Sprite>> mSprites;		//!< Our sprites. Allows for easier rending with more functionality without functions that have a thousand paramiters.
 	uint32_t mNextSpriteIndex = 1;								//!< The next sprite index to use when a sprite is allocated.
+
+	std::map<uint32_t,std::unique_ptr<SpriteBatch>> mSpriteSpriteBatchs;	//!< Our sprite batches. Allows for easier rending with more functionality without functions that have a thousand paramiters.
+	uint32_t mNextSpriteBatchIndex = 1;										//!< The next sprite batch index to use when a sprite batch is allocated.
+
+	static const size_t mNumQuads = 2000;
+	static const size_t mIndicesPerQuad = 6;
+	std::array<uint16_t,mNumQuads * mIndicesPerQuad> mQuadIndices;	//!< Turns a list of a set of four quads into two triangles for rendering so they can be sepirate. (used in sprites)
 
 	/**
 	 * @brief Some data used for diagnostics/
@@ -544,6 +620,7 @@ private:
 		TinyShader TextureColour;
 		TinyShader TextureAlphaOnly;
 		TinyShader SpriteShader;
+		TinyShader SpriteBatchShader;
 
 		TinyShader CurrentShader;
 	}mShaders;

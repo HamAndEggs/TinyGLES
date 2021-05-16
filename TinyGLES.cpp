@@ -179,6 +179,7 @@ enum struct StreamIndex
 	VERTEX				= 0,		//!< Vertex positional data.
 	TEXCOORD			= 1,		//!< Texture coordinate information.
 	COLOUR				= 2,		//!< Colour type is in the format RGBA.
+	TRANSFORM			= 3,		//!< Used for sprite batches.
 };
 
 /**
@@ -226,6 +227,56 @@ struct Sprite
 		mUV.v[3].y = scaleUV(pTextureHeight,pTexToY);
 	}
 };
+
+/**
+ * @brief Represents a large number of sprites, used for speeding up rendering as we do the draw with one call.
+ */
+struct SpriteBatch
+{
+	uint32_t mTexture;
+	float mWidth,mHeight,mCX,mCY;
+	std::vector<Quad2Df> mVerts;
+	std::vector<Quad2D> mUVs;
+	std::vector<SpriteBatchTransform> mTransforms;
+
+	inline size_t GetNumQuads()const{return mVerts.size();}
+
+	void BuildVerts(int pCount)
+	{
+		Quad2Df v;
+		v.v[0].x = -mCX;
+		v.v[0].y = -mCY;
+		v.v[1].x = mWidth - mCX;
+		v.v[1].y = -mCY;
+		v.v[2].x = mWidth - mCX;
+		v.v[2].y = mHeight - mCY;
+		v.v[3].x = -mCX;
+		v.v[3].y = mHeight - mCY;
+
+		mVerts.resize(pCount,v);
+	}
+
+	void BuildUVs(int pCount,int pTextureWidth,int pTextureHeight,int pTexFromX,int pTexFromY,int pTexToX,int pTexToY)
+	{
+		auto scaleUV = [](int pSize,int pCoord)
+		{
+			return (0x7fff * pCoord) / pSize;
+		};
+
+		Quad2D uv;
+		uv.v[0].x = scaleUV(pTextureWidth,pTexFromX);
+		uv.v[0].y = scaleUV(pTextureHeight,pTexFromY);
+		uv.v[1].x = scaleUV(pTextureWidth,pTexToX);
+		uv.v[1].y = scaleUV(pTextureHeight,pTexFromY);
+		uv.v[2].x = scaleUV(pTextureWidth,pTexToX);
+		uv.v[2].y = scaleUV(pTextureHeight,pTexToY);
+		uv.v[3].x = scaleUV(pTextureWidth,pTexFromX);
+		uv.v[3].y = scaleUV(pTextureHeight,pTexToY);
+
+		mUVs.resize(pCount,uv);
+	}
+};
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // scratch memory buffer utility
@@ -556,6 +607,19 @@ GLES::GLES(bool pVerbose) :
 	mPlatform(std::make_unique<PlatformInterface>(pVerbose)),
 	mWorkBuffers(std::make_unique<WorkBuffers>())
 {
+	// Fill quad index buffer.
+	uint16_t baseIndex = 0;
+	for( size_t n = 0 ; n < mNumQuads ; n++, baseIndex += 4 )
+	{
+		size_t i = n * mIndicesPerQuad;
+		mQuadIndices[i + 0] = 0 + baseIndex;
+		mQuadIndices[i + 1] = 1 + baseIndex;
+		mQuadIndices[i + 2] = 2 + baseIndex;
+		mQuadIndices[i + 3] = 0 + baseIndex;
+		mQuadIndices[i + 4] = 2 + baseIndex;
+		mQuadIndices[i + 5] = 3 + baseIndex;
+	}
+
 	// Lets hook ctrl + c.
 	mUsersSignalAction = signal(SIGINT,CtrlHandler);
 
@@ -615,6 +679,7 @@ GLES::~GLES()
 	mShaders.TextureColour.reset();
 	mShaders.TextureAlphaOnly.reset();
 	mShaders.SpriteShader.reset();
+	mShaders.SpriteBatchShader.reset();
 
 	// delete all free type fonts.
 #ifdef USE_FREETYPEFONTS
@@ -789,7 +854,7 @@ void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGr
 	EnableShader(mShaders.ColourOnly);
 	mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 
-	VertexPtr(2,GL_SHORT,4,quad);
+	VertexPtr(2,GL_SHORT,quad);
 	glDrawArrays(GL_LINES,0,2);
 	CHECK_OGL_ERRORS();
 }
@@ -818,7 +883,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	EnableShader(mShaders.ColourOnly);
 	mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 
-	VertexPtr(2,GL_FLOAT,8,verts);
+	VertexPtr(2,GL_FLOAT,verts);
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,pNumPoints);
 	CHECK_OGL_ERRORS();
 }
@@ -832,10 +897,10 @@ void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_
 
 	if( mShaders.CurrentShader->GetUsesTexture() )
 	{
-		TexCoordPtr(2,GL_SHORT,4,uv);
+		TexCoordPtr(2,GL_SHORT,uv);
 	}
 
-	VertexPtr(2,GL_SHORT,4,quad);
+	VertexPtr(2,GL_SHORT,quad);
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,4);
 	CHECK_OGL_ERRORS();
 }
@@ -894,7 +959,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 	EnableShader(mShaders.ColourOnly);
 	mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 
-	VertexPtr(2,GL_FLOAT,8,verts);
+	VertexPtr(2,GL_FLOAT,verts);
 	glDrawArrays(pFilled?GL_TRIANGLE_FAN:GL_LINE_LOOP,0,numPoints);
 	CHECK_OGL_ERRORS();
 }
@@ -982,7 +1047,7 @@ void GLES::SpriteDraw(uint32_t pSprite)
 	mShaders.CurrentShader->SetTexture(sprite->mTexture);
 	mShaders.CurrentShader->SetGlobalColour(1.0f,1.0f,1.0f,1.0f);
 
-	VertexPtr(2,GL_FLOAT,8,sprite->mVert.data());
+	VertexPtr(2,GL_FLOAT,sprite->mVert.data());
 
 	// Because UV's are normalized.
 	glVertexAttribPointer(
@@ -1005,6 +1070,114 @@ void GLES::SpriteSetCenter(uint32_t pSprite,float pCX,float pCY)
 	sprite->BuildVerts();
 }
 
+uint32_t GLES::SpriteBatchCreate(uint32_t pTexture,int pCount,float pWidth,float pHeight,float pCX,float pCY,int pTexFromX,int pTexFromY,int pTexToX,int pTexToY)
+{
+	// Will throw an exception if texture not found, done early on so we don't waste sprint indices.
+	const int texWidth = GetTextureWidth(pTexture);
+	const int texHeight = GetTextureHeight(pTexture);
+
+	const uint32_t newBatch = mNextSpriteBatchIndex++;
+	if( newBatch == 0 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Failed to create sprite, sprite handles have wrapped around. You have some serious bugs and memory leaks!");
+	}
+
+	if( mSpriteSpriteBatchs.find(newBatch) != mSpriteSpriteBatchs.end() )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Bug found in rendering code, sprite index is an index that we already know about.");
+	}
+
+	mSpriteSpriteBatchs[newBatch] = std::make_unique<SpriteBatch>();
+	SpriteBatch* s = mSpriteSpriteBatchs[newBatch].get();
+
+	s->mTexture = pTexture;
+	s->mWidth = pWidth;
+	s->mHeight = pHeight;
+	s->mCX = pCX;
+	s->mCY = pCY;
+
+	s->BuildVerts(pCount);
+	s->BuildUVs(pCount,texWidth,texHeight,pTexFromX,pTexFromY,pTexToX,pTexToY);
+	s->mTransforms.resize(pCount);
+
+	return newBatch;
+}
+
+uint32_t GLES::SpriteBatchCreate(uint32_t pTexture,int pCount,float pWidth,float pHeight,float pCX,float pCY)
+{
+	const float texWidth = GetTextureWidth(pTexture);
+	const float texHeight = GetTextureHeight(pTexture);
+	return SpriteBatchCreate(pTexture,pCount,pWidth,pHeight,pCX,pCY,0,0,texWidth,texHeight);
+}
+
+uint32_t GLES::SpriteBatchCreate(uint32_t pTexture,int pCount)
+{
+	const float texWidth = GetTextureWidth(pTexture);
+	const float texHeight = GetTextureHeight(pTexture);
+	return SpriteBatchCreate(pTexture,pCount,texWidth,texHeight,texWidth / 2.0f,texHeight / 2.0f,0,0,texWidth,texHeight);
+}
+
+void GLES::SpriteBatchDelete(uint32_t pSpriteBatch)
+{
+	if( mSpriteSpriteBatchs.find(pSpriteBatch) != mSpriteSpriteBatchs.end() )
+	{
+		mSpriteSpriteBatchs.erase(pSpriteBatch);
+	}
+}
+
+void GLES::SpriteBatchDraw(uint32_t pSpriteBatch)
+{
+	assert(mShaders.SpriteBatchShader);
+
+	auto& spriteBatch = mSpriteSpriteBatchs.at(pSpriteBatch);
+
+	EnableShader(mShaders.SpriteBatchShader);
+
+	assert(mShaders.CurrentShader == mShaders.SpriteBatchShader);
+	mShaders.CurrentShader->SetTexture(spriteBatch->mTexture);
+	mShaders.CurrentShader->SetGlobalColour(1.0f,1.0f,1.0f,1.0f);
+
+	VertexPtr(2,GL_FLOAT,spriteBatch->mVerts.data());
+
+	// Because UV's are normalized.
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::TEXCOORD,
+				2,
+				GL_SHORT,
+				GL_TRUE,
+				0,spriteBatch->mUVs.data());
+
+	glEnableVertexAttribArray((int)StreamIndex::TRANSFORM);
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::TRANSFORM,
+				4,
+				GL_FLOAT,
+				GL_FALSE,
+				0,
+				spriteBatch->mTransforms.data());
+
+	glDrawElements(GL_TRIANGLES,spriteBatch->GetNumQuads() * mIndicesPerQuad,GL_UNSIGNED_SHORT,mQuadIndices.data());
+	CHECK_OGL_ERRORS();
+
+	glDisableVertexAttribArray((int)StreamIndex::TRANSFORM);
+}
+
+void GLES::SpriteBatchDraw(uint32_t pSpriteBatch,int pFromIndex,int pToIndex)
+{
+
+}
+
+void GLES::SpriteBatchSetTransform(uint32_t pSpriteBatch,int pIndex,float pX,float pY,float pRotation,float pScale)
+{
+	auto& spriteBatch = mSpriteSpriteBatchs.at(pSpriteBatch);
+	spriteBatch->mTransforms[pIndex].SetTransform(pX,pX,pRotation,pScale);
+}
+
+std::vector<SpriteBatchTransform>& GLES::SpriteBatchGetTransform(uint32_t pSpriteBatch)
+{
+	auto& spriteBatch = mSpriteSpriteBatchs.at(pSpriteBatch);
+	return spriteBatch->mTransforms;
+}
 
 //*******************************************
 // Texture functions
@@ -1355,7 +1528,7 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 		10,11,15,10,15,14		
 	};
 
-	VertexPtr(2,GL_SHORT,4,mWorkBuffers->vec2Ds.Data());
+	VertexPtr(2,GL_SHORT,mWorkBuffers->vec2Ds.Data());
 	glDrawElements(GL_TRIANGLES,9*6,GL_UNSIGNED_BYTE,indices);
 	CHECK_OGL_ERRORS();
 
@@ -1403,7 +1576,7 @@ void GLES::FontPrint(int pX,int pY,const char* pText)
 				4,mWorkBuffers->uvShort.Data());
 	CHECK_OGL_ERRORS();
 
-	VertexPtr(2,GL_SHORT,4,mWorkBuffers->vec2Ds.Data());
+	VertexPtr(2,GL_SHORT,mWorkBuffers->vec2Ds.Data());
 	CHECK_OGL_ERRORS();
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
 	CHECK_OGL_ERRORS();
@@ -1542,7 +1715,7 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 				GL_TRUE,
 				4,mWorkBuffers->uvShort.Data());
 
-	VertexPtr(2,GL_SHORT,4,mWorkBuffers->vec2Ds.Data());
+	VertexPtr(2,GL_SHORT,mWorkBuffers->vec2Ds.Data());
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
 	CHECK_OGL_ERRORS();
 }
@@ -1956,7 +2129,60 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.SpriteShader = std::make_unique<GLShader>("SpriteShader",SpriteShader_VS,SpriteShader_PS,mVerbose);	
+	mShaders.SpriteShader = std::make_unique<GLShader>("SpriteShader",SpriteShader_VS,SpriteShader_PS,mVerbose);
+
+	const char* SpriteBatchShader_VS = R"(
+		uniform mat4 u_proj_cam;
+		uniform vec4 u_global_colour;
+		attribute vec4 a_xyz;
+		attribute vec2 a_uv0;
+		attribute vec4 a_trans;
+		varying vec4 v_col;
+		varying vec2 v_tex0;
+		void main(void)
+		{
+			float scale = a_trans.w;
+			float sCos = cos(a_trans.z);
+			float sSin = sin(a_trans.z);
+
+			mat4 trans;
+			trans[0][0] = sCos * scale;
+			trans[0][1] = sSin * scale;
+			trans[0][2] = 0.0; 
+			trans[0][3] = 0.0;
+
+			trans[1][0] = -sSin * scale;
+			trans[1][1] = sCos * scale;
+			trans[1][2] = 0.0; 
+			trans[1][3] = 0.0;
+
+			trans[2][0] = 0.0;
+			trans[2][1] = 0.0;
+			trans[2][2] = scale;
+			trans[2][3] = 0.0;
+
+			trans[3][0] = a_trans.x;
+			trans[3][1] = a_trans.y;
+			trans[3][2] = 0.0;
+			trans[3][3] = 1.0;
+
+			v_col = u_global_colour;
+			v_tex0 = a_uv0;
+			gl_Position = u_proj_cam * (trans * a_xyz);
+		}
+	)";
+
+	const char *SpriteBatchShader_PS = R"(
+		varying vec4 v_col;
+		varying vec2 v_tex0;
+		uniform sampler2D u_tex0;
+		void main(void)
+		{
+			gl_FragColor = v_col * texture2D(u_tex0,v_tex0);
+		}
+	)";
+
+	mShaders.SpriteBatchShader = std::make_unique<GLShader>("SpriteBatchShader",SpriteBatchShader_VS,SpriteBatchShader_PS,mVerbose);
 }
 
 void GLES::SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
@@ -2071,37 +2297,33 @@ void GLES::InitFreeTypeFont()
 #endif
 }
 
-void GLES::VertexPtr(int pNum_coord, uint32_t pType, int pStride,const void* pPointer)
+void GLES::VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer)
 {
 	if(pNum_coord < 2 || pNum_coord > 3)
 	{
 		THROW_MEANINGFUL_EXCEPTION("VertexPtr passed invalid value for pNum_coord, must be 2 or 3 got " + std::to_string(pNum_coord));
 	}
 
-	return SetUserSpaceStreamPtr((GLuint)StreamIndex::VERTEX,pNum_coord,pType,pStride,pPointer);
+	return SetUserSpaceStreamPtr((GLuint)StreamIndex::VERTEX,pNum_coord,pType,pPointer);
 }
 
-void GLES::TexCoordPtr(int pNum_coord, uint32_t pType, int pStride,const void* pPointer)
+void GLES::TexCoordPtr(int pNum_coord, uint32_t pType,const void* pPointer)
 {
-	return SetUserSpaceStreamPtr((GLuint)StreamIndex::TEXCOORD,pNum_coord,pType,pStride,pPointer);
+	return SetUserSpaceStreamPtr((GLuint)StreamIndex::TEXCOORD,pNum_coord,pType,pPointer);
 }
 
-void GLES::ColourPtr(int pNum_coord, int pStride,const uint8_t* pPointer)
+void GLES::ColourPtr(int pNum_coord,const uint8_t* pPointer)
 {
 	if(pNum_coord < 3 || pNum_coord > 4)
 	{
 		THROW_MEANINGFUL_EXCEPTION("ColourPtr passed invalid value for pNum_coord, must be 3 or 4 got " + std::to_string(pNum_coord));
 	}
 
-	return SetUserSpaceStreamPtr((GLuint)StreamIndex::COLOUR,pNum_coord,GL_BYTE,pStride,pPointer);
+	return SetUserSpaceStreamPtr((GLuint)StreamIndex::COLOUR,pNum_coord,GL_BYTE,pPointer);
 }
 
-void GLES::SetUserSpaceStreamPtr(uint32_t pStream,GLint pNum_coord, uint32_t pType, int pStride,const void* pPointer)
+void GLES::SetUserSpaceStreamPtr(uint32_t pStream,GLint pNum_coord, uint32_t pType,const void* pPointer)
 {
-	if( pStride == 0 )
-	{
-		THROW_MEANINGFUL_EXCEPTION("SetUserSpaceStreamPtr passed invalid value for pStride, must be > 0 ");
-	}
 
 	if( pStream != (GLuint)StreamIndex::VERTEX && pStream != (GLuint)StreamIndex::TEXCOORD && pStream != (GLuint)StreamIndex::COLOUR  )
 	{
@@ -2113,7 +2335,7 @@ void GLES::SetUserSpaceStreamPtr(uint32_t pStream,GLint pNum_coord, uint32_t pTy
 				pNum_coord,
 				pType,
 				pType == GL_BYTE,
-				pStride,pPointer);
+				0,pPointer);
 	CHECK_OGL_ERRORS();
 }
 
@@ -2167,7 +2389,7 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 	BindAttribLocation((int)StreamIndex::VERTEX, "a_xyz");
 	BindAttribLocation((int)StreamIndex::TEXCOORD, "a_uv0");
 //	BindAttribLocation((int)StreamIndex::COLOUR, "a_col");
-
+	BindAttribLocation((int)StreamIndex::TRANSFORM, "a_trans");
 
 	glLinkProgram(mShader); // creates OpenGL program executables
 	CHECK_OGL_ERRORS();
@@ -2264,6 +2486,7 @@ void GLShader::Enable(const float projInvcam[4][4])
 	{
 		glDisableVertexAttribArray((int)StreamIndex::TEXCOORD);
 	}
+
     CHECK_OGL_ERRORS();
 }
 

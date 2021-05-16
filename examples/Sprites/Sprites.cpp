@@ -39,7 +39,7 @@ struct ABall
     float rotSpeed = 5.0f;
     float scale = 0.25f + (((float)rand()/(float)RAND_MAX) * 1.0f);
 
-    void Update(tinygles::GLES &GL,uint32_t ballSprite)
+    void Update(tinygles::GLES &GL)
     {
         const int size = (int)(32.0f * scale);
         ballx += vx;
@@ -87,10 +87,17 @@ struct ABall
             mRotation -= 360.0f;
         else if( mRotation < 0.0f )
             mRotation += 360.0f;
+    }
 
-
+    void Draw(tinygles::GLES &GL,uint32_t ballSprite)
+    {
         GL.SetTransform2D(ballx,bally,tinygles::DegreeToRadian(mRotation),scale);
         GL.SpriteDraw(ballSprite);
+    }
+
+    void GetTransform(tinygles::SpriteBatchTransform* pTransform)
+    {
+        pTransform->SetTransform(ballx,bally,tinygles::DegreeToRadian(mRotation),scale);
     }
 };
 
@@ -104,6 +111,15 @@ int main(int argc, char *argv[])
 
     tinygles::GLES GL(true);
 
+    bool usingBatch = true;
+    GL.SetSystemEventHandler([&usingBatch](auto pEvent)
+    {
+        if( pEvent.mType == tinygles::SystemEventType::POINTER_DOWN )
+        {
+            usingBatch = !usingBatch;
+        }
+    });
+
     // Load in a test texture
     uint32_t Bird_by_Magnus = LoadTexture(GL,"../data/Bird_by_Magnus.png");
     uint32_t ball = LoadTexture(GL,"../data/foot-ball2.png");
@@ -114,7 +130,9 @@ int main(int argc, char *argv[])
     uint32_t ballSprite = GL.SpriteCreate(ball);
     uint32_t NeedleSprite = GL.SpriteCreate(Needle,16,64,8,80);
 
-    std::array<ABall,20> balls;
+    std::array<ABall,200> balls;
+
+    uint32_t ballBatch = GL.SpriteBatchCreate(ball,balls.size());
 
     int anim = 0;
     std::cout << "Starting render loop\n";
@@ -126,7 +144,26 @@ int main(int argc, char *argv[])
     
         for( auto& b : balls )
         {
-            b.Update(GL,ballSprite);
+            b.Update(GL);
+        }
+
+        if( usingBatch )
+        {
+            tinygles::SpriteBatchTransform* trans = GL.SpriteBatchGetTransform(ballBatch).data();
+            for( auto& b : balls )
+            {
+                b.GetTransform(trans);                
+                trans++;
+            }
+
+            GL.SpriteBatchDraw(ballBatch);
+        }
+        else
+        {
+            for( auto& b : balls )
+            {
+                b.Draw(GL,ballSprite);
+            }
         }
 
         GL.FillRectangle(0,GL.GetHeight()-400,256,GL.GetHeight(),tree);
@@ -141,6 +178,11 @@ int main(int argc, char *argv[])
         GL.SetTransform2D(DialX+128,DialY+128,r,1.3f);
         GL.SpriteDraw(NeedleSprite);
 
+        GL.FontPrint(0,0,"Press here to toggle batch drawing");
+        if( usingBatch )
+            GL.FontPrint(0,15,"Drawing with a batch");
+        else
+            GL.FontPrint(0,15,"Drawing one at a time");
 
         GL.EndFrame();
 
