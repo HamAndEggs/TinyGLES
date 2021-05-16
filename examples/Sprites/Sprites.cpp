@@ -140,6 +140,8 @@ int main(int argc, char *argv[])
     {
         anim++;
 
+        usingBatch = ((anim>>8)&1) == 1;
+
         GL.Clear(Bird_by_Magnus);
     
         for( auto& b : balls )
