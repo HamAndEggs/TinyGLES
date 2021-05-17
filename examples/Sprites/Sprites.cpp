@@ -31,17 +31,17 @@ static uint32_t LoadTexture(tinygles::GLES &GL,const char* pFilename,bool pFilte
 
 struct ABall
 {
-    int ballx = rand()%1000;
-    int bally = rand()%500;
-    int vx = 1 + (rand()%10);
-    int vy = 1 + (rand()%10);
+    int16_t ballx = (int16_t)(rand()%1000);
+    int16_t bally = (int16_t)(rand()%500);
+    int16_t vx = (int16_t)(1 + (rand()%10));
+    int16_t vy = (int16_t)(1 + (rand()%10));
     float mRotation = 0.0f;
     float rotSpeed = 5.0f;
     float scale = 0.25f + (((float)rand()/(float)RAND_MAX) * 1.0f);
 
     void Update(tinygles::GLES &GL)
     {
-        const int size = (int)(32.0f * scale);
+        const int16_t size = (int16_t)(32.0f * scale);
         ballx += vx;
         if( ballx > GL.GetWidth()-size)
         {
@@ -95,9 +95,9 @@ struct ABall
         GL.SpriteDraw(ballSprite);
     }
 
-    void GetTransform(tinygles::SpriteBatchTransform* pTransform)
+    void GetTransform(tinygles::QuadBatchTransform* pTransform)
     {
-        pTransform->SetTransform(ballx,bally,tinygles::DegreeToRadian(mRotation),scale);
+        pTransform->SetTransform(ballx,bally,tinygles::DegreeToRadian(mRotation),64 * scale);
     }
 };
 
@@ -132,7 +132,7 @@ int main(int argc, char *argv[])
 
     std::array<ABall,200> balls;
 
-    uint32_t ballBatch = GL.SpriteBatchCreate(ball,balls.size());
+    uint32_t ballBatch = GL.QuadBatchCreate(ball,balls.size());
 
     int anim = 0;
     std::cout << "Starting render loop\n";
@@ -148,13 +148,13 @@ int main(int argc, char *argv[])
 
         if( usingBatch )
         {
-            tinygles::SpriteBatchTransform* trans = GL.SpriteBatchGetTransform(ballBatch).data();
+            tinygles::QuadBatchTransform* trans = GL.QuadBatchGetTransform(ballBatch).data();
             for( auto& b : balls )
             {
                 b.GetTransform(trans);                
                 trans++;
             }
-            GL.SpriteBatchDraw(ballBatch);
+            GL.QuadBatchDraw(ballBatch);
         }
         else
         {

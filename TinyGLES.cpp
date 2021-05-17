@@ -229,35 +229,24 @@ struct Sprite
 };
 
 /**
- * @brief Represents a large number of sprites, used for speeding up rendering as we do the draw with one call.
+ * @brief Represents a large number of quads, handy when you want to render many at once. Like particles.
  */
-struct SpriteBatch
+struct QuadBatch
 {
+	const uint32_t mNumQuads;
 	uint32_t mTexture;
-	float mWidth,mHeight,mCX,mCY;
-	std::vector<Quad2Df> mVerts;
+
 	std::vector<Quad2D> mUVs;
-	std::vector<SpriteBatchTransform> mTransforms;
+	std::vector<QuadBatchTransform> mTransforms;
 
-	inline size_t GetNumQuads()const{return mVerts.size();}
+	inline size_t GetNumQuads()const{return mNumQuads;}
 
-	void BuildVerts(int pCount)
+	QuadBatch(int pCount,uint32_t pTexture,int pTextureWidth,int pTextureHeight,int pTexFromX,int pTexFromY,int pTexToX,int pTexToY) :
+		mNumQuads(pCount),
+		mTexture(pTexture)
 	{
-		Quad2Df v;
-		v.v[0].x = -mCX;
-		v.v[0].y = -mCY;
-		v.v[1].x = mWidth - mCX;
-		v.v[1].y = -mCY;
-		v.v[2].x = mWidth - mCX;
-		v.v[2].y = mHeight - mCY;
-		v.v[3].x = -mCX;
-		v.v[3].y = mHeight - mCY;
+		mTransforms.resize(pCount);
 
-		mVerts.resize(pCount,v);
-	}
-
-	void BuildUVs(int pCount,int pTextureWidth,int pTextureHeight,int pTexFromX,int pTexFromY,int pTexToX,int pTexToY)
-	{
 		auto scaleUV = [](int pSize,int pCoord)
 		{
 			return (0x7fff * pCoord) / pSize;
@@ -666,14 +655,14 @@ GLES::~GLES()
 	CHECK_OGL_ERRORS();
 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
-	glDeleteBuffers(1,&mQuadIndices);
+	glDeleteBuffers(1,&mQuadBatch.IndicesBuffer);
 
 	mShaders.CurrentShader.reset();
 	mShaders.ColourOnly.reset();
 	mShaders.TextureColour.reset();
 	mShaders.TextureAlphaOnly.reset();
 	mShaders.SpriteShader.reset();
-	mShaders.SpriteBatchShader.reset();
+	mShaders.QuadBatchShader.reset();
 
 	// delete all free type fonts.
 #ifdef USE_FREETYPEFONTS
@@ -1064,74 +1053,62 @@ void GLES::SpriteSetCenter(uint32_t pSprite,float pCX,float pCY)
 	sprite->BuildVerts();
 }
 
-uint32_t GLES::SpriteBatchCreate(uint32_t pTexture,int pCount,float pWidth,float pHeight,float pCX,float pCY,int pTexFromX,int pTexFromY,int pTexToX,int pTexToY)
+uint32_t GLES::QuadBatchCreate(uint32_t pTexture,int pCount,int pTexFromX,int pTexFromY,int pTexToX,int pTexToY)
 {
 	// Will throw an exception if texture not found, done early on so we don't waste sprint indices.
 	const int texWidth = GetTextureWidth(pTexture);
 	const int texHeight = GetTextureHeight(pTexture);
 
-	const uint32_t newBatch = mNextSpriteBatchIndex++;
+	const uint32_t newBatch = mQuadBatch.NextIndex++;
 	if( newBatch == 0 )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Failed to create sprite, sprite handles have wrapped around. You have some serious bugs and memory leaks!");
 	}
 
-	if( mSpriteSpriteBatchs.find(newBatch) != mSpriteSpriteBatchs.end() )
+	if( mQuadBatch.Batchs.find(newBatch) != mQuadBatch.Batchs.end() )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Bug found in rendering code, sprite index is an index that we already know about.");
 	}
 
-	mSpriteSpriteBatchs[newBatch] = std::make_unique<SpriteBatch>();
-	SpriteBatch* s = mSpriteSpriteBatchs[newBatch].get();
-
-	s->mTexture = pTexture;
-	s->mWidth = pWidth;
-	s->mHeight = pHeight;
-	s->mCX = pCX;
-	s->mCY = pCY;
-
-	s->BuildVerts(pCount);
-	s->BuildUVs(pCount,texWidth,texHeight,pTexFromX,pTexFromY,pTexToX,pTexToY);
-	s->mTransforms.resize(pCount);
-
+	mQuadBatch.Batchs[newBatch] = std::make_unique<QuadBatch>(pCount,pTexture,texWidth,texHeight,pTexFromX,pTexFromY,pTexToX,pTexToY);
 	return newBatch;
 }
 
-uint32_t GLES::SpriteBatchCreate(uint32_t pTexture,int pCount,float pWidth,float pHeight,float pCX,float pCY)
+uint32_t GLES::QuadBatchCreate(uint32_t pTexture,int pCount)
 {
 	const float texWidth = GetTextureWidth(pTexture);
 	const float texHeight = GetTextureHeight(pTexture);
-	return SpriteBatchCreate(pTexture,pCount,pWidth,pHeight,pCX,pCY,0,0,texWidth,texHeight);
+	return QuadBatchCreate(pTexture,pCount,0,0,texWidth,texHeight);
 }
 
-uint32_t GLES::SpriteBatchCreate(uint32_t pTexture,int pCount)
+void GLES::QuadBatchDelete(uint32_t pQuadBatch)
 {
-	const float texWidth = GetTextureWidth(pTexture);
-	const float texHeight = GetTextureHeight(pTexture);
-	return SpriteBatchCreate(pTexture,pCount,texWidth,texHeight,texWidth / 2.0f,texHeight / 2.0f,0,0,texWidth,texHeight);
-}
-
-void GLES::SpriteBatchDelete(uint32_t pSpriteBatch)
-{
-	if( mSpriteSpriteBatchs.find(pSpriteBatch) != mSpriteSpriteBatchs.end() )
+	if( mQuadBatch.Batchs.find(pQuadBatch) != mQuadBatch.Batchs.end() )
 	{
-		mSpriteSpriteBatchs.erase(pSpriteBatch);
+		mQuadBatch.Batchs.erase(pQuadBatch);
 	}
 }
 
-void GLES::SpriteBatchDraw(uint32_t pSpriteBatch)
+void GLES::QuadBatchDraw(uint32_t pQuadBatch)
 {
-	assert(mShaders.SpriteBatchShader);
+	assert(mShaders.QuadBatchShader);
 
-	auto& spriteBatch = mSpriteSpriteBatchs.at(pSpriteBatch);
+	auto& QuadBatch = mQuadBatch.Batchs.at(pQuadBatch);
 
-	EnableShader(mShaders.SpriteBatchShader);
+	EnableShader(mShaders.QuadBatchShader);
 
-	assert(mShaders.CurrentShader == mShaders.SpriteBatchShader);
-	mShaders.CurrentShader->SetTexture(spriteBatch->mTexture);
+	assert(mShaders.CurrentShader == mShaders.QuadBatchShader);
+	mShaders.CurrentShader->SetTexture(QuadBatch->mTexture);
 	mShaders.CurrentShader->SetGlobalColour(1.0f,1.0f,1.0f,1.0f);
 
-	VertexPtr(2,GL_FLOAT,spriteBatch->mVerts.data());
+	glBindBuffer(GL_ARRAY_BUFFER,mQuadBatch.VerticesBuffer);
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::VERTEX,
+				2,
+				GL_BYTE,
+				GL_TRUE,
+				0,0);
+	glBindBuffer(GL_ARRAY_BUFFER,0);
 
 	// Because UV's are normalized.
 	glVertexAttribPointer(
@@ -1139,43 +1116,51 @@ void GLES::SpriteBatchDraw(uint32_t pSpriteBatch)
 				2,
 				GL_SHORT,
 				GL_TRUE,
-				0,spriteBatch->mUVs.data());
+				0,QuadBatch->mUVs.data());
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TRANSFORM,
 				4,
-				GL_FLOAT,
+				GL_SHORT,
 				GL_FALSE,
 				0,
-				spriteBatch->mTransforms.data());
+				QuadBatch->mTransforms.data());
 
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadIndices);
-	glDrawElements(GL_TRIANGLES,spriteBatch->GetNumQuads() * mIndicesPerQuad,GL_UNSIGNED_SHORT,0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadBatch.IndicesBuffer);
+	glDrawElements(GL_TRIANGLES,QuadBatch->GetNumQuads() * mQuadBatch.IndicesPerQuad,GL_UNSIGNED_SHORT,0);
 	CHECK_OGL_ERRORS();
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 }
 
-void GLES::SpriteBatchDraw(uint32_t pSpriteBatch,size_t pFromIndex,size_t pToIndex)
+void GLES::QuadBatchDraw(uint32_t pQuadBatch,size_t pFromIndex,size_t pToIndex)
 {
 	if( pToIndex <= pFromIndex )
 	{
 		return;// Allow this as their code may use this case at the start or end of an effect.
 	}
 
-	assert(mShaders.SpriteBatchShader);
+	assert(mShaders.QuadBatchShader);
 
-	auto& spriteBatch = mSpriteSpriteBatchs.at(pSpriteBatch);
+	auto& QuadBatch = mQuadBatch.Batchs.at(pQuadBatch);
 
-	assert( pFromIndex < spriteBatch->GetNumQuads() );
-	assert( pToIndex < spriteBatch->GetNumQuads() );
+	assert( pFromIndex < QuadBatch->GetNumQuads() );
+	assert( pToIndex < QuadBatch->GetNumQuads() );
 
-	EnableShader(mShaders.SpriteBatchShader);
+	EnableShader(mShaders.QuadBatchShader);
 
-	assert(mShaders.CurrentShader == mShaders.SpriteBatchShader);
-	mShaders.CurrentShader->SetTexture(spriteBatch->mTexture);
+	assert(mShaders.CurrentShader == mShaders.QuadBatchShader);
+	mShaders.CurrentShader->SetTexture(QuadBatch->mTexture);
 	mShaders.CurrentShader->SetGlobalColour(1.0f,1.0f,1.0f,1.0f);
 
-	VertexPtr(2,GL_FLOAT,spriteBatch->mVerts.data());
+	glBindBuffer(GL_ARRAY_BUFFER,mQuadBatch.VerticesBuffer);
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::VERTEX,
+				2,
+				GL_BYTE,
+				GL_TRUE,
+				0,0);
+	glBindBuffer(GL_ARRAY_BUFFER,0);
+
 
 	// Because UV's are normalized.
 	glVertexAttribPointer(
@@ -1183,7 +1168,7 @@ void GLES::SpriteBatchDraw(uint32_t pSpriteBatch,size_t pFromIndex,size_t pToInd
 				2,
 				GL_SHORT,
 				GL_TRUE,
-				0,spriteBatch->mUVs.data());
+				0,QuadBatch->mUVs.data());
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TRANSFORM,
@@ -1191,27 +1176,21 @@ void GLES::SpriteBatchDraw(uint32_t pSpriteBatch,size_t pFromIndex,size_t pToInd
 				GL_FLOAT,
 				GL_FALSE,
 				0,
-				spriteBatch->mTransforms.data());
+				QuadBatch->mTransforms.data());
 
 /*	const uint16_t* idx = mQuadIndices.data();
-	idx += pFromIndex * mIndicesPerQuad;
+	idx += pFromIndex * mQuadBatch.IndicesPerQuad;
 
-	const int count = (pToIndex - pFromIndex) * mIndicesPerQuad;
+	const int count = (pToIndex - pFromIndex) * mQuadBatch.IndicesPerQuad;
 
 	glDrawElements(GL_TRIANGLES,count,GL_UNSIGNED_SHORT,idx);
 	CHECK_OGL_ERRORS();*/
 }
 
-void GLES::SpriteBatchSetTransform(uint32_t pSpriteBatch,int pIndex,float pX,float pY,float pRotation,float pScale)
+std::vector<QuadBatchTransform>& GLES::QuadBatchGetTransform(uint32_t pQuadBatch)
 {
-	auto& spriteBatch = mSpriteSpriteBatchs.at(pSpriteBatch);
-	spriteBatch->mTransforms[pIndex].SetTransform(pX,pX,pRotation,pScale);
-}
-
-std::vector<SpriteBatchTransform>& GLES::SpriteBatchGetTransform(uint32_t pSpriteBatch)
-{
-	auto& spriteBatch = mSpriteSpriteBatchs.at(pSpriteBatch);
-	return spriteBatch->mTransforms;
+	auto& QuadBatch = mQuadBatch.Batchs.at(pQuadBatch);
+	return QuadBatch->mTransforms;
 }
 
 //*******************************************
@@ -2166,7 +2145,7 @@ void GLES::BuildShaders()
 
 	mShaders.SpriteShader = std::make_unique<GLShader>("SpriteShader",SpriteShader_VS,SpriteShader_PS,mVerbose);
 
-	const char* SpriteBatchShader_VS = R"(
+	const char* QuadBatchShader_VS = R"(
 		uniform mat4 u_proj_cam;
 		uniform vec4 u_global_colour;
 		attribute vec4 a_xyz;
@@ -2177,8 +2156,8 @@ void GLES::BuildShaders()
 		void main(void)
 		{
 			float scale = a_trans.w;
-			float sCos = cos(a_trans.z);
-			float sSin = sin(a_trans.z);
+			float sCos = cos(a_trans.z * 0.00019175455);
+			float sSin = sin(a_trans.z * 0.00019175455);
 
 			mat4 trans;
 			trans[0][0] = sCos * scale;
@@ -2207,7 +2186,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	const char *SpriteBatchShader_PS = R"(
+	const char *QuadBatchShader_PS = R"(
 		varying vec4 v_col;
 		varying vec2 v_tex0;
 		uniform sampler2D u_tex0;
@@ -2217,7 +2196,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.SpriteBatchShader = std::make_unique<GLShader>("SpriteBatchShader",SpriteBatchShader_VS,SpriteBatchShader_PS,mVerbose);
+	mShaders.QuadBatchShader = std::make_unique<GLShader>("QuadBatchShader",QuadBatchShader_VS,QuadBatchShader_PS,mVerbose);
 }
 
 void GLES::SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
@@ -2335,22 +2314,44 @@ void GLES::InitFreeTypeFont()
 void GLES::AllocateQuadBuffers()
 {
 	// Fill quad index buffer.
-	uint16_t* idx = (uint16_t*)mWorkBuffers->scratchRam.Restart(mNumQuads * mIndicesPerQuad);
+	uint16_t* idx = (uint16_t*)mWorkBuffers->scratchRam.Restart(mQuadBatch.MaxQuads * mQuadBatch.IndicesPerQuad);
 	uint16_t baseIndex = 0;
-	for( size_t n = 0 ; n < mNumQuads ; n++, baseIndex += 4 )
+	for( size_t n = 0 ; n < mQuadBatch.MaxQuads ; n++, baseIndex += 4, idx += mQuadBatch.IndicesPerQuad )
 	{
-		size_t i = n * mIndicesPerQuad;
-		idx[i + 0] = 0 + baseIndex;
-		idx[i + 1] = 1 + baseIndex;
-		idx[i + 2] = 2 + baseIndex;
-		idx[i + 3] = 0 + baseIndex;
-		idx[i + 4] = 2 + baseIndex;
-		idx[i + 5] = 3 + baseIndex;
+		idx[0] = 0 + baseIndex;
+		idx[1] = 1 + baseIndex;
+		idx[2] = 2 + baseIndex;
+		idx[3] = 0 + baseIndex;
+		idx[4] = 2 + baseIndex;
+		idx[5] = 3 + baseIndex;
 	}
-	glGenBuffers(1,&mQuadIndices);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadIndices);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER,mNumQuads * mIndicesPerQuad,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
+	glGenBuffers(1,&mQuadBatch.IndicesBuffer);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadBatch.IndicesBuffer);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER,mQuadBatch.MaxQuads * mQuadBatch.IndicesPerQuad,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
+	CHECK_OGL_ERRORS();
+
+	// Now build the verts for the quads, here we can use signed bytes.
+	int8_t* v = (int8_t*)mWorkBuffers->scratchRam.Restart(mQuadBatch.MaxQuads * 2 * 4);
+	for( size_t n = 0 ; n < mQuadBatch.MaxQuads ; n++, baseIndex += 4, v += (2 * 4) )
+	{
+		v[0] = -63;	// x
+		v[1] = -63;	// y
+
+		v[2] =  63;
+		v[3] = -63;
+
+		v[4] =  63;
+		v[5] =  63;
+
+		v[6] = -63;
+		v[7] =  63;
+	}
+
+	glGenBuffers(1,&mQuadBatch.VerticesBuffer);
+	glBindBuffer(GL_ARRAY_BUFFER,mQuadBatch.VerticesBuffer);
+	glBufferData(GL_ARRAY_BUFFER,mQuadBatch.MaxQuads * 2 * 4,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER,0);
 	CHECK_OGL_ERRORS();
 }
 
