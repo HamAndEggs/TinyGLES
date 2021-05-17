@@ -139,9 +139,6 @@ int main(int argc, char *argv[])
     while( GL.BeginFrame() )
     {
         anim++;
-
-        usingBatch = ((anim>>8)&1) == 1;
-
         GL.Clear(Bird_by_Magnus);
     
         for( auto& b : balls )
@@ -157,7 +154,6 @@ int main(int argc, char *argv[])
                 b.GetTransform(trans);                
                 trans++;
             }
-
             GL.SpriteBatchDraw(ballBatch);
         }
         else

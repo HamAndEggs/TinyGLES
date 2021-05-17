@@ -522,6 +522,9 @@ struct GLShader
 
 	const std::string mName;	//!< Mainly to help debugging.
 	const bool mVerbose;
+	const bool mEnableStreamUV;
+	const bool mEnableStreamTrans;
+
 	GLint mShader = 0;
 	GLint mVertexShader = 0;
 	GLint mFragmentShader = 0;
@@ -607,19 +610,6 @@ GLES::GLES(bool pVerbose) :
 	mPlatform(std::make_unique<PlatformInterface>(pVerbose)),
 	mWorkBuffers(std::make_unique<WorkBuffers>())
 {
-	// Fill quad index buffer.
-	uint16_t baseIndex = 0;
-	for( size_t n = 0 ; n < mNumQuads ; n++, baseIndex += 4 )
-	{
-		size_t i = n * mIndicesPerQuad;
-		mQuadIndices[i + 0] = 0 + baseIndex;
-		mQuadIndices[i + 1] = 1 + baseIndex;
-		mQuadIndices[i + 2] = 2 + baseIndex;
-		mQuadIndices[i + 3] = 0 + baseIndex;
-		mQuadIndices[i + 4] = 2 + baseIndex;
-		mQuadIndices[i + 5] = 3 + baseIndex;
-	}
-
 	// Lets hook ctrl + c.
 	mUsersSignalAction = signal(SIGINT,CtrlHandler);
 
@@ -654,6 +644,7 @@ GLES::GLES(bool pVerbose) :
 	BuildDebugTexture();
 	BuildPixelFontTexture();
 	InitFreeTypeFont();
+	AllocateQuadBuffers();
 }
 
 GLES::~GLES()
@@ -673,6 +664,9 @@ GLES::~GLES()
 
 	glUseProgram(0);
 	CHECK_OGL_ERRORS();
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
+	glDeleteBuffers(1,&mQuadIndices);
 
 	mShaders.CurrentShader.reset();
 	mShaders.ColourOnly.reset();
@@ -1147,7 +1141,6 @@ void GLES::SpriteBatchDraw(uint32_t pSpriteBatch)
 				GL_TRUE,
 				0,spriteBatch->mUVs.data());
 
-	glEnableVertexAttribArray((int)StreamIndex::TRANSFORM);
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TRANSFORM,
 				4,
@@ -1156,15 +1149,57 @@ void GLES::SpriteBatchDraw(uint32_t pSpriteBatch)
 				0,
 				spriteBatch->mTransforms.data());
 
-	glDrawElements(GL_TRIANGLES,spriteBatch->GetNumQuads() * mIndicesPerQuad,GL_UNSIGNED_SHORT,mQuadIndices.data());
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadIndices);
+	glDrawElements(GL_TRIANGLES,spriteBatch->GetNumQuads() * mIndicesPerQuad,GL_UNSIGNED_SHORT,0);
 	CHECK_OGL_ERRORS();
-
-	glDisableVertexAttribArray((int)StreamIndex::TRANSFORM);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 }
 
-void GLES::SpriteBatchDraw(uint32_t pSpriteBatch,int pFromIndex,int pToIndex)
+void GLES::SpriteBatchDraw(uint32_t pSpriteBatch,size_t pFromIndex,size_t pToIndex)
 {
+	if( pToIndex <= pFromIndex )
+	{
+		return;// Allow this as their code may use this case at the start or end of an effect.
+	}
 
+	assert(mShaders.SpriteBatchShader);
+
+	auto& spriteBatch = mSpriteSpriteBatchs.at(pSpriteBatch);
+
+	assert( pFromIndex < spriteBatch->GetNumQuads() );
+	assert( pToIndex < spriteBatch->GetNumQuads() );
+
+	EnableShader(mShaders.SpriteBatchShader);
+
+	assert(mShaders.CurrentShader == mShaders.SpriteBatchShader);
+	mShaders.CurrentShader->SetTexture(spriteBatch->mTexture);
+	mShaders.CurrentShader->SetGlobalColour(1.0f,1.0f,1.0f,1.0f);
+
+	VertexPtr(2,GL_FLOAT,spriteBatch->mVerts.data());
+
+	// Because UV's are normalized.
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::TEXCOORD,
+				2,
+				GL_SHORT,
+				GL_TRUE,
+				0,spriteBatch->mUVs.data());
+
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::TRANSFORM,
+				4,
+				GL_FLOAT,
+				GL_FALSE,
+				0,
+				spriteBatch->mTransforms.data());
+
+/*	const uint16_t* idx = mQuadIndices.data();
+	idx += pFromIndex * mIndicesPerQuad;
+
+	const int count = (pToIndex - pFromIndex) * mIndicesPerQuad;
+
+	glDrawElements(GL_TRIANGLES,count,GL_UNSIGNED_SHORT,idx);
+	CHECK_OGL_ERRORS();*/
 }
 
 void GLES::SpriteBatchSetTransform(uint32_t pSpriteBatch,int pIndex,float pX,float pY,float pRotation,float pScale)
@@ -2297,6 +2332,28 @@ void GLES::InitFreeTypeFont()
 #endif
 }
 
+void GLES::AllocateQuadBuffers()
+{
+	// Fill quad index buffer.
+	uint16_t* idx = (uint16_t*)mWorkBuffers->scratchRam.Restart(mNumQuads * mIndicesPerQuad);
+	uint16_t baseIndex = 0;
+	for( size_t n = 0 ; n < mNumQuads ; n++, baseIndex += 4 )
+	{
+		size_t i = n * mIndicesPerQuad;
+		idx[i + 0] = 0 + baseIndex;
+		idx[i + 1] = 1 + baseIndex;
+		idx[i + 2] = 2 + baseIndex;
+		idx[i + 3] = 0 + baseIndex;
+		idx[i + 4] = 2 + baseIndex;
+		idx[i + 5] = 3 + baseIndex;
+	}
+	glGenBuffers(1,&mQuadIndices);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadIndices);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER,mNumQuads * mIndicesPerQuad,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
+	CHECK_OGL_ERRORS();
+}
+
 void GLES::VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer)
 {
 	if(pNum_coord < 2 || pNum_coord > 3)
@@ -2367,7 +2424,9 @@ void GLES::CtrlHandler(int SigNum)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFragment,bool pVerbose) :
 	mName(pName),
-	mVerbose(pVerbose)
+	mVerbose(pVerbose),
+	mEnableStreamUV(strstr(pVertex," a_uv0;")),
+	mEnableStreamTrans(strstr(pVertex," a_trans;"))
 {
 	VERBOSE_MESSAGE("GLShader::Create: " << mName);
 
@@ -2478,7 +2537,7 @@ void GLShader::Enable(const float projInvcam[4][4])
     glUniformMatrix4fv(mUniforms.proj_cam, 1, false,(const float*)projInvcam);
     CHECK_OGL_ERRORS();
 
-	if( GetUsesTexture() )
+	if( mEnableStreamUV )
 	{
 		glEnableVertexAttribArray((int)StreamIndex::TEXCOORD);
 	}
@@ -2486,6 +2545,16 @@ void GLShader::Enable(const float projInvcam[4][4])
 	{
 		glDisableVertexAttribArray((int)StreamIndex::TEXCOORD);
 	}
+
+	if( mEnableStreamTrans )
+	{
+		glEnableVertexAttribArray((int)StreamIndex::TRANSFORM);
+	}
+	else
+	{
+		glDisableVertexAttribArray((int)StreamIndex::TRANSFORM);
+	}
+
 
     CHECK_OGL_ERRORS();
 }

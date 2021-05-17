@@ -388,7 +388,7 @@ public:
 	/**
 	 * @brief Draws the sprites within the range specified, expects that their transforms will have been set.
 	 */
-	void SpriteBatchDraw(uint32_t pSpriteBatch,int pFromIndex,int pToIndex);
+	void SpriteBatchDraw(uint32_t pSpriteBatch,size_t pFromIndex,size_t pToIndex);
 
 	/**
 	 * @brief Sets the transform for the sprite at index for the sprite batch.
@@ -550,6 +550,7 @@ private:
 	void BuildDebugTexture();
 	void BuildPixelFontTexture();
 	void InitFreeTypeFont();
+	void AllocateQuadBuffers();
 
 	void VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer);
 	void TexCoordPtr(int pNum_coord, uint32_t pType,const void* pPointer);
@@ -577,7 +578,7 @@ private:
 
 	static const size_t mNumQuads = 2000;
 	static const size_t mIndicesPerQuad = 6;
-	std::array<uint16_t,mNumQuads * mIndicesPerQuad> mQuadIndices;	//!< Turns a list of a set of four quads into two triangles for rendering so they can be sepirate. (used in sprites)
+	uint32_t mQuadIndices = -1;	//!< Turns a list of a set of four quads into two triangles for rendering so they can be sepirate. (used in sprites)
 
 	/**
 	 * @brief Some data used for diagnostics/
