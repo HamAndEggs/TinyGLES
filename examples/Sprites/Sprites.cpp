@@ -130,7 +130,7 @@ int main(int argc, char *argv[])
     uint32_t ballSprite = GL.SpriteCreate(ball);
     uint32_t NeedleSprite = GL.SpriteCreate(Needle,16,64,8,80);
 
-    std::array<ABall,200> balls;
+    std::array<ABall,8000> balls;
 
     uint32_t ballBatch = GL.QuadBatchCreate(ball,balls.size());
 

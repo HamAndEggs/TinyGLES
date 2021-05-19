@@ -580,7 +580,7 @@ private:
 		std::map<uint32_t,std::unique_ptr<QuadBatch>> Batchs;	//!< Our sprite batches. Allows for easier rending with more functionality without functions that have a thousand paramiters.
 		uint32_t NextIndex = 1;									//!< The next sprite batch index to use when a sprite batch is allocated.
 
-		const size_t MaxQuads = 2000;
+		const size_t MaxQuads = 8000;
 		const size_t IndicesPerQuad = 6;
 
 		uint32_t IndicesBuffer = -1;	//!< Turns a list of a set of four quads into two triangles for rendering so they can be sepirate. (used in sprites)

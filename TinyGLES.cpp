@@ -392,7 +392,7 @@ struct Vec2DShortScratchBuffer : public ScratchBuffer<Vec2Ds,256,64,1024>
 
 struct WorkBuffers
 {
-	ScratchBuffer<uint8_t,128,16,256*256*4> scratchRam;// gets used for some temporary texture operations.
+	ScratchBuffer<uint8_t,128,16,512*512*4> scratchRam;// gets used for some temporary texture operations.
 	ScratchBuffer<Vec2Df,128,16,128> vec2Df;
 	Vec2DShortScratchBuffer vec2Ds;
 	Vec2DShortScratchBuffer uvShort;
@@ -2314,7 +2314,7 @@ void GLES::InitFreeTypeFont()
 void GLES::AllocateQuadBuffers()
 {
 	// Fill quad index buffer.
-	uint16_t* idx = (uint16_t*)mWorkBuffers->scratchRam.Restart(mQuadBatch.MaxQuads * mQuadBatch.IndicesPerQuad);
+	uint16_t* idx = (uint16_t*)mWorkBuffers->scratchRam.Restart(sizeof(uint16_t) * mQuadBatch.MaxQuads * mQuadBatch.IndicesPerQuad);
 	uint16_t baseIndex = 0;
 	for( size_t n = 0 ; n < mQuadBatch.MaxQuads ; n++, baseIndex += 4, idx += mQuadBatch.IndicesPerQuad )
 	{
@@ -2332,7 +2332,7 @@ void GLES::AllocateQuadBuffers()
 	CHECK_OGL_ERRORS();
 
 	// Now build the verts for the quads, here we can use signed bytes.
-	int8_t* v = (int8_t*)mWorkBuffers->scratchRam.Restart(mQuadBatch.MaxQuads * 2 * 4);
+	int8_t* v = (int8_t*)mWorkBuffers->scratchRam.Restart((sizeof(uint16_t) * 4) * mQuadBatch.MaxQuads * 4);
 	for( size_t n = 0 ; n < mQuadBatch.MaxQuads ; n++, baseIndex += 4, v += (2 * 4) )
 	{
 		v[0] = -63;	// x
