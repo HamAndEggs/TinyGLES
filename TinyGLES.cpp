@@ -102,6 +102,13 @@ struct Vec2Ds
 	int16_t x,y;
 };
 
+struct Vec2Db
+{
+	Vec2Db() = default;
+	Vec2Db(int8_t pX,int8_t pY):x(pX),y(pY){};
+	int8_t x,y;
+};
+
 struct Quad2D
 {
 	Vec2Ds v[4];
@@ -2314,10 +2321,15 @@ void GLES::InitFreeTypeFont()
 void GLES::AllocateQuadBuffers()
 {
 	// Fill quad index buffer.
-	uint16_t* idx = (uint16_t*)mWorkBuffers->scratchRam.Restart(sizeof(uint16_t) * mQuadBatch.MaxQuads * mQuadBatch.IndicesPerQuad);
+	const size_t numIndices = mQuadBatch.IndicesPerQuad * mQuadBatch.MaxQuads;
+	const size_t sizeofQuadIndexBuffer = sizeof(uint16_t) * numIndices;
+	uint16_t* idx = (uint16_t*)mWorkBuffers->scratchRam.Restart(sizeofQuadIndexBuffer);
+	const uint16_t* idx_end = idx + numIndices;
 	uint16_t baseIndex = 0;
 	for( size_t n = 0 ; n < mQuadBatch.MaxQuads ; n++, baseIndex += 4, idx += mQuadBatch.IndicesPerQuad )
 	{
+		assert( idx + mQuadBatch.IndicesPerQuad <= idx_end );
+
 		idx[0] = 0 + baseIndex;
 		idx[1] = 1 + baseIndex;
 		idx[2] = 2 + baseIndex;
@@ -2327,30 +2339,35 @@ void GLES::AllocateQuadBuffers()
 	}
 	glGenBuffers(1,&mQuadBatch.IndicesBuffer);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadBatch.IndicesBuffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER,mQuadBatch.MaxQuads * mQuadBatch.IndicesPerQuad,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER,sizeofQuadIndexBuffer,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 	CHECK_OGL_ERRORS();
 
 	// Now build the verts for the quads, here we can use signed bytes.
-	int8_t* v = (int8_t*)mWorkBuffers->scratchRam.Restart((sizeof(uint16_t) * 4) * mQuadBatch.MaxQuads * 4);
-	for( size_t n = 0 ; n < mQuadBatch.MaxQuads ; n++, baseIndex += 4, v += (2 * 4) )
+	const size_t numberOfVectors = mQuadBatch.VerticesPerQuad * mQuadBatch.MaxQuads;
+	const size_t sizeofQuadVertBuffer = sizeof(Vec2Db) * numberOfVectors;
+	Vec2Db* v = (Vec2Db*)mWorkBuffers->scratchRam.Restart(sizeofQuadVertBuffer);
+	const Vec2Db* v_end = v + numberOfVectors;
+	for( size_t n = 0 ; n < mQuadBatch.MaxQuads ; n++, v += mQuadBatch.VerticesPerQuad )
 	{
-		v[0] = -63;	// x
-		v[1] = -63;	// y
+		assert( v + mQuadBatch.VerticesPerQuad <= v_end );
 
-		v[2] =  63;
-		v[3] = -63;
+		v[0].x = -63;
+		v[0].y = -63;
 
-		v[4] =  63;
-		v[5] =  63;
+		v[1].x =  63;
+		v[1].y = -63;
 
-		v[6] = -63;
-		v[7] =  63;
+		v[2].x =  63;
+		v[2].y =  63;
+
+		v[3].x = -63;
+		v[3].y =  63;
 	}
 
 	glGenBuffers(1,&mQuadBatch.VerticesBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER,mQuadBatch.VerticesBuffer);
-	glBufferData(GL_ARRAY_BUFFER,mQuadBatch.MaxQuads * 2 * 4,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER,sizeofQuadVertBuffer,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER,0);
 	CHECK_OGL_ERRORS();
 }

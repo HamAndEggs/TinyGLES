@@ -582,6 +582,7 @@ private:
 
 		const size_t MaxQuads = 8000;
 		const size_t IndicesPerQuad = 6;
+		const size_t VerticesPerQuad = 4;
 
 		uint32_t IndicesBuffer = -1;	//!< Turns a list of a set of four quads into two triangles for rendering so they can be sepirate. (used in sprites)
 		uint32_t VerticesBuffer = -1;	//!< Buffer object of unit values used to define the corners of the quad.
