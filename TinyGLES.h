@@ -75,6 +75,11 @@ constexpr float GetRadian()
 	return 2.0f * GetPI();
 }
 
+constexpr float GetRadianToSignedShort()
+{
+	return 32767.0f / GetRadian();
+}
+
 constexpr float DegreeToRadian(float pDegree)
 {
 	return pDegree * (GetPI()/180.0f);
@@ -131,6 +136,34 @@ enum struct TextureFormat
 	FORMAT_ALPHA
 };
 
+struct QuadBatchTransform
+{
+	// We have to have four because of how we draw quads.
+	// This is because GLES 2.0 does not have a quad primitive or have instance rendering.
+	// When I support more higher API's I can adjust how this works to get full speed on these systems.
+	// For now, just make it work.
+	inline void SetTransform(int16_t pX,int16_t pY,float pRotation,int16_t pSize)
+	{
+		//const int16_t rot = (int16_t)(pRotation * GetRadianToSignedShort());
+		const int16_t rot = (int16_t)(pRotation * 5215.03002029f);
+		for( int n = 0 ; n < 4 ; n++ )
+		{
+			trans[n].x = pX;
+			trans[n].y = pY;
+			trans[n].r = rot;
+			trans[n].s = pSize;
+		}
+	}
+
+	struct
+	{
+		int16_t x = 0;
+		int16_t y = 0;
+		int16_t r = 0;	//!< Rotation in radians
+		int16_t s = 1;	//!< Pixel size.
+	}trans[4];
+};
+
 // Forward decleration of internal types.
 typedef std::shared_ptr<struct GLShader> TinyShader;
 struct FreeTypeFont;
@@ -139,6 +172,7 @@ struct NinePatch;			//!< Internal data used to draw the nine patch objects.
 struct WorkBuffers;			//!< Internal work buffers for building temporay render data.
 struct PlatformInterface;	//!< Abstraction of the rendering platform we use to get the work done.
 struct Sprite;				//!< The sprite object. Defined in the source code, only need a forward definition here.
+struct QuadBatch;			//!< The sprite batch object. Defined in the source code, only need a forward definition here.
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -332,6 +366,43 @@ public:
 	void SpriteSetCenter(uint32_t pSprite,float pCX,float pCY);
 
 //*******************************************
+// Quad batch functions, these are a bit like sprites that are rendered all in one go.
+// Because of this have some restritions which is why they are not called sprites.
+
+	/**
+	 * @brief creates a list of the quads that will allow many to be drawn in one function draw for much faster speed.
+	 * The transform, rotation and scale is uploaded in a separate data stream. Poor mans instancing as it's not available in the lower end systems we support.
+	 * Texture has to be the same for all, no way of making that different per sprite. Size is set on a per quad basis in the transform data stream.
+	 * Always rotate around their center.
+	 */
+	uint32_t QuadBatchCreate(uint32_t pTexture,int pCount,int pTexFromX,int pTexFromY,int pTexToX,int pTexToY);
+
+	/**
+	 * @brief Util function, same as above but sets the UV's to use all of the texture and sprite size to size of texture.
+	 */
+	uint32_t QuadBatchCreate(uint32_t pTexture,int pCount);
+
+	/**
+	 * @brief Deletes the sprite batch.
+	 */
+	void QuadBatchDelete(uint32_t pQuadBatch);
+
+	/**
+	 * @brief Draws all the quads, expects that all their transforms will have been set.
+	 */
+	void QuadBatchDraw(uint32_t pQuadBatch);
+
+	/**
+	 * @brief Draws the quads within the range specified, expects that their transforms will have been set.
+	 */
+	void QuadBatchDraw(uint32_t pQuadBatch,size_t pFromIndex,size_t pToIndex);
+
+	/**
+	 * @brief Call this to setup the transform data for all the quads.
+	 */
+	std::vector<QuadBatchTransform>& QuadBatchGetTransform(uint32_t pQuadBatch);
+
+//*******************************************
 // Texture functions
 	/**
 	 * @brief Create a Texture object with the size passed in and a given name. 
@@ -481,11 +552,12 @@ private:
 	void BuildDebugTexture();
 	void BuildPixelFontTexture();
 	void InitFreeTypeFont();
+	void AllocateQuadBuffers();
 
-	void VertexPtr(int pNum_coord, uint32_t pType, int pStride,const void* pPointer);
-	void TexCoordPtr(int pNum_coord, uint32_t pType, int pStride,const void* pPointer);
-	void ColourPtr(int pNum_coord, int pStride,const uint8_t* pPointer);
-	void SetUserSpaceStreamPtr(uint32_t pStream,int pNum_coord, uint32_t pType, int pStride,const void* pPointer);
+	void VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer);
+	void TexCoordPtr(int pNum_coord, uint32_t pType,const void* pPointer);
+	void ColourPtr(int pNum_coord,const uint8_t* pPointer);
+	void SetUserSpaceStreamPtr(uint32_t pStream,int pNum_coord, uint32_t pType,const void* pPointer);
 
 	const bool mVerbose;
 	bool mKeepGoing = true;								//!< Set to false by the application requesting to exit or the user doing ctrl + c.
@@ -502,6 +574,19 @@ private:
 
 	std::map<uint32_t,std::unique_ptr<Sprite>> mSprites;		//!< Our sprites. Allows for easier rending with more functionality without functions that have a thousand paramiters.
 	uint32_t mNextSpriteIndex = 1;								//!< The next sprite index to use when a sprite is allocated.
+
+	struct
+	{
+		std::map<uint32_t,std::unique_ptr<QuadBatch>> Batchs;	//!< Our sprite batches. Allows for easier rending with more functionality without functions that have a thousand paramiters.
+		uint32_t NextIndex = 1;									//!< The next sprite batch index to use when a sprite batch is allocated.
+
+		const size_t MaxQuads = 8000;
+		const size_t IndicesPerQuad = 6;
+		const size_t VerticesPerQuad = 4;
+
+		uint32_t IndicesBuffer = -1;	//!< Turns a list of a set of four quads into two triangles for rendering so they can be sepirate. (used in sprites)
+		uint32_t VerticesBuffer = -1;	//!< Buffer object of unit values used to define the corners of the quad.
+	}mQuadBatch;
 
 	/**
 	 * @brief Some data used for diagnostics/
@@ -544,6 +629,7 @@ private:
 		TinyShader TextureColour;
 		TinyShader TextureAlphaOnly;
 		TinyShader SpriteShader;
+		TinyShader QuadBatchShader;
 
 		TinyShader CurrentShader;
 	}mShaders;
