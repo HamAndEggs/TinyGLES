@@ -53,7 +53,9 @@
             ],
             "define": [
                 "DEBUG_BUILD",
-                "PLATFORM_GLES"
+                "PLATFORM_GLES",
+                "EGL_NO_X11",
+                "MESA_EGL_NO_X11_HEADERS"
             ]
         },
         "X11-debug":
