@@ -2144,6 +2144,7 @@ void GLES::SetRenderingDefaults()
 void GLES::BuildShaders()
 {
 	const char* ColourOnly_VS = R"(
+		precision highp float;
 		uniform mat4 u_proj_cam;
 		uniform vec4 u_global_colour;
 		attribute vec4 a_xyz;
@@ -2156,6 +2157,7 @@ void GLES::BuildShaders()
 	)";
 
 	const char *ColourOnly_PS = R"(
+		precision highp float;
 		varying vec4 v_col;
 		void main(void)
 		{
@@ -2166,6 +2168,7 @@ void GLES::BuildShaders()
 	mShaders.ColourOnly = std::make_unique<GLShader>("ColourOnly",ColourOnly_VS,ColourOnly_PS,mVerbose);
 
 	const char* TextureColour_VS = R"(
+		precision highp float;
 		uniform mat4 u_proj_cam;
 		uniform vec4 u_global_colour;
 		attribute vec4 a_xyz;
@@ -2181,6 +2184,7 @@ void GLES::BuildShaders()
 	)";
 
 	const char *TextureColour_PS = R"(
+		precision highp float;
 		varying vec4 v_col;
 		varying vec2 v_tex0;
 		uniform sampler2D u_tex0;
@@ -2193,6 +2197,7 @@ void GLES::BuildShaders()
 	mShaders.TextureColour = std::make_unique<GLShader>("TextureColour",TextureColour_VS,TextureColour_PS,mVerbose);
 
 	const char* TextureAlphaOnly_VS = R"(
+		precision highp float;
 		uniform mat4 u_proj_cam;
 		uniform vec4 u_global_colour;
 		attribute vec4 a_xyz;
@@ -2208,6 +2213,7 @@ void GLES::BuildShaders()
 	)";
 
 	const char *TextureAlphaOnly_PS = R"(
+		precision highp float;
 		varying vec4 v_col;
 		varying vec2 v_tex0;
 		uniform sampler2D u_tex0;
@@ -2220,6 +2226,7 @@ void GLES::BuildShaders()
 	mShaders.TextureAlphaOnly = std::make_unique<GLShader>("TextureAlphaOnly",TextureAlphaOnly_VS,TextureAlphaOnly_PS,mVerbose);
 	
 	const char* SpriteShader_VS = R"(
+		precision highp float;
 		uniform mat4 u_proj_cam;
 		uniform mat4 u_trans;
 		uniform vec4 u_global_colour;
@@ -2236,6 +2243,7 @@ void GLES::BuildShaders()
 	)";
 
 	const char *SpriteShader_PS = R"(
+		precision highp float;
 		varying vec4 v_col;
 		varying vec2 v_tex0;
 		uniform sampler2D u_tex0;
@@ -2248,6 +2256,7 @@ void GLES::BuildShaders()
 	mShaders.SpriteShader = std::make_unique<GLShader>("SpriteShader",SpriteShader_VS,SpriteShader_PS,mVerbose);
 
 	const char* QuadBatchShader_VS = R"(
+		precision highp float;
 		uniform mat4 u_proj_cam;
 		uniform vec4 u_global_colour;
 		attribute vec4 a_xyz;
@@ -2289,6 +2298,7 @@ void GLES::BuildShaders()
 	)";
 
 	const char *QuadBatchShader_PS = R"(
+		precision highp float;
 		varying vec4 v_col;
 		varying vec2 v_tex0;
 		uniform sampler2D u_tex0;
