@@ -64,6 +64,7 @@
 
 // This is for linux systems that have no window manager. Like RPi4 running their light version of raspbian or a distro built with Yocto.
 #ifdef PLATFORM_DIRECT_RENDER_MANAGER
+//sudo apt install libdrm
 	#include <xf86drm.h>
 	#include <xf86drmMode.h>
 	#include <gbm.h>

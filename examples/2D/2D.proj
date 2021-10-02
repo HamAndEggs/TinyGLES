@@ -42,7 +42,7 @@
             "include":
             [
                 "../..",
-                "/usr/include/drm"
+                "/usr/include/libdrm"
             ],
             "libs":
             [
