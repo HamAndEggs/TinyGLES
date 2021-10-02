@@ -675,6 +675,8 @@ GLES::GLES(bool pVerbose) :
 	BuildPixelFontTexture();
 	InitFreeTypeFont();
 	AllocateQuadBuffers();
+
+	VERBOSE_MESSAGE("GLES Ready");
 }
 
 GLES::~GLES()
@@ -2391,6 +2393,7 @@ void GLES::BuildDebugTexture()
 
 void GLES::BuildPixelFontTexture()
 {
+	VERBOSE_MESSAGE("Creating pixel font texture");
 	// This is alpha 4bits per pixel data. So we need to pad it out.
 	uint8_t* pixels = mWorkBuffers->scratchRam.Restart(256*256);
 	int n = 0;
@@ -2425,6 +2428,7 @@ void GLES::InitFreeTypeFont()
 
 void GLES::AllocateQuadBuffers()
 {
+	VERBOSE_MESSAGE("Creating quad buffers");
 	// Fill quad index buffer.
 	const size_t numIndices = mQuadBatch.IndicesPerQuad * mQuadBatch.MaxQuads;
 	const size_t sizeofQuadIndexBuffer = sizeof(uint16_t) * numIndices;
@@ -2442,9 +2446,12 @@ void GLES::AllocateQuadBuffers()
 		idx[4] = 2 + baseIndex;
 		idx[5] = 3 + baseIndex;
 	}
+	std::clog << "1\n";
 	glGenBuffers(1,&mQuadBatch.IndicesBuffer);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadBatch.IndicesBuffer);
+	std::clog << "2\n";
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER,sizeofQuadIndexBuffer,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
+	std::clog << "3\n";
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 	CHECK_OGL_ERRORS();
 
@@ -2469,11 +2476,14 @@ void GLES::AllocateQuadBuffers()
 		v[3].x = -63;
 		v[3].y =  63;
 	}
+	std::clog << "4\n";
 
 	glGenBuffers(1,&mQuadBatch.VerticesBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER,mQuadBatch.VerticesBuffer);
 	glBufferData(GL_ARRAY_BUFFER,sizeofQuadVertBuffer,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER,0);
+		std::clog << "5\n";
+
 	CHECK_OGL_ERRORS();
 }
 

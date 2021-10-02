@@ -16,6 +16,7 @@ int main(int argc, char *argv[])
 
     tinygles::GLES GL(true);
 
+    std::cout << "Main loop\b";
     int anim = 0;
     while( GL.BeginFrame() )
     {
