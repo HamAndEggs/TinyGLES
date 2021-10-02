@@ -567,7 +567,7 @@ private:
 
 	std::unique_ptr<PlatformInterface> mPlatform;				//!< This is all the data needed to drive the rendering platform that this code sits on and used to render with.
 	std::unique_ptr<WorkBuffers> mWorkBuffers;					//!< Handy set of internal work buffers used when rendering so we don't blow the stack or thrash the heap. Easy speed up.
-	SystemEventHandler mSystemEventHandler = nullptr;			//!< Where all events that we are intrested in are routed.
+	SystemEventHandler mSystemEventHandler = nullptr;			//!< Where all events that we are interested in are routed.
 	std::map<uint32_t,std::unique_ptr<GLTexture>> mTextures; 	//!< Our textures. I reuse the GL texture index (handle) for my own. A handy value and works well.
 	std::map<uint32_t,std::unique_ptr<NinePatch>> mNinePatchs;	//!< Our nine patch data, image data is also into the textures map. I reuse the GL texture index (handle) for my own. A handy value and works well.
 	NinePatchDrawInfo mNinePatchDrawInfo;						//!< Temporary buffer used to pass back rending information to the caller of the DrawNinePatch so they can draw in the safe area.

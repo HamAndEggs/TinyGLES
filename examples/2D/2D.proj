@@ -34,14 +34,15 @@
                 "PLATFORM_GLES"
             ]
         },
-        "GLES-debug":
+        "DRM-debug":
         {
             "default": false,
             "enable_all_warnings": false,
             "standard": "c++17",
             "include":
             [
-                "../.."
+                "../..",
+                "/usr/include/drm"
             ],
             "libs":
             [
@@ -49,13 +50,14 @@
                 "pthread",
                 "m",
                 "GLESv2",
-                "EGL"
+                "EGL",
+                "gbm",
+                "drm"
             ],
             "define": [
                 "DEBUG_BUILD",
                 "PLATFORM_GLES",
-                "EGL_NO_X11",
-                "MESA_EGL_NO_X11_HEADERS"
+                "PLATFORM_DIRECT_RENDER_MANAGER"
             ]
         },
         "X11-debug":

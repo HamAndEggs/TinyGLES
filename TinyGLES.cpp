@@ -57,8 +57,20 @@
 	#define glColorMask(RED__,GREEN__,BLUE__,ALPHA__)
 #endif
 
+// This is for RPi 3,2 and 1 (including zero)
 #ifdef BROADCOM_NATIVE_WINDOW // All included from /opt/vc/include
 	#include "bcm_host.h"
+#endif
+
+// This is for linux systems that have no window manager. Like RPi4 running their light version of raspbian or a distro built with Yocto.
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+	#include <xf86drm.h>
+	#include <xf86drmMode.h>
+	#include <gbm.h>
+
+	#define EGL_NO_X11
+	#define MESA_EGL_NO_X11_HEADERS
+
 #endif
 
 #ifdef PLATFORM_GLES
@@ -536,21 +548,29 @@ struct GLShader
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// GLES 2.0 emulation hidden definition.
+// GLES 2.0 hidden definition.
 #ifdef PLATFORM_GLES
 struct PlatformInterface
 {
 	PlatformInterface(bool pVerbose){}
 
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+	int mDRMFile = 0;
+	struct gbm_device *mBufferManager = nullptr;
+#endif
+
 	EGLDisplay mDisplay = nullptr;				//!<GL display
 	EGLSurface mSurface = nullptr;				//!<GL rendering surface
 	EGLContext mContext = nullptr;				//!<GL rendering context
 	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
-	#ifdef BROADCOM_NATIVE_WINDOW
-		EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
-	#else 
-		EGLNativeWindowType mNativeWindow;
-	#endif
+
+#ifdef BROADCOM_NATIVE_WINDOW
+	EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
+#elif defined PLATFORM_DIRECT_RENDER_MANAGER
+	struct gbm_surface *mNativeWindow = nullptr;
+#else
+	EGLNativeWindowType mNativeWindow = nullptr;
+#endif
 };
 #endif
 
@@ -631,6 +651,19 @@ GLES::GLES(bool pVerbose) :
 		}
 	}
 
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+	if( drmAvailable() == 0 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Kernel DRM driver not loaded");
+	}
+	const char* deviceFileName = "/dev/dri/card0";
+	mPlatform->mDRMFile = open(deviceFileName, O_RDWR);
+	if( mPlatform->mDRMFile < 0 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to open device " + std::string(deviceFileName) );
+	}
+#endif
+
 	FetchDisplayMode();
 	InitialiseDisplay();
 	FindGLESConfiguration();
@@ -697,6 +730,12 @@ GLES::~GLES()
 	eglDestroyContext(mPlatform->mDisplay, mPlatform->mContext);
     eglDestroySurface(mPlatform->mDisplay, mPlatform->mSurface);
     eglTerminate(mPlatform->mDisplay);
+
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+	gbm_surface_destroy(mPlatform->mNativeWindow);
+	gbm_device_destroy(mPlatform->mBufferManager);
+	close(mPlatform->mDRMFile);
+#endif
 
 	VERBOSE_MESSAGE("All done");
 }
@@ -1849,7 +1888,48 @@ void GLES::ProcessSystemEvents()
 
 void GLES::FetchDisplayMode()
 {
-#ifdef PLATFORM_GLES
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+	drmModeRes* resources = drmModeGetResources(mPlatform->mDRMFile);
+	if( resources == nullptr )
+	{
+		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode resources");
+	}
+
+	drmModeConnector* connector = nullptr;
+	for(int n = 0 ; n < resources->count_connectors && connector == nullptr ; n++ )
+	{
+		connector = drmModeGetConnector(mPlatform->mDRMFile, resources->connectors[n]);
+		if( connector && connector->connection != DRM_MODE_CONNECTED )
+		{// Not connected, check next one...
+			drmModeFreeConnector(connector);
+			connector = nullptr;
+		}
+	}
+	if( connector == nullptr )
+	{
+		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode connector");
+	}
+
+	mWidth = mHeight = 0;
+	for( int i = 0 ; i < connector->count_modes && mWidth == 0 ; i++ )
+	{
+		if( connector->modes[i].type & DRM_MODE_TYPE_PREFERRED )
+		{// DRM really wants us to use this, this should be the best option for LCD displays.
+			mWidth = connector->modes[i].hdisplay;
+			mHeight = connector->modes[i].vdisplay;
+		}
+	}
+
+	if( mWidth == 0 || mHeight == 0 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find screen mode");
+	}
+
+	drmModeFreeConnector(connector);
+	drmModeFreeResources(resources);
+#endif
+
+#ifdef PLATFORM_EGL
 	struct fb_var_screeninfo vinfo;
 	{
 		int File = open("/dev/fb0", O_RDWR);
@@ -1885,7 +1965,15 @@ void GLES::InitialiseDisplay()
 
 #ifdef PLATFORM_GLES
 	VERBOSE_MESSAGE("Calling eglGetDisplay");
+
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+	mPlatform->mBufferManager = gbm_create_device(mPlatform->mDRMFile);
+	mPlatform->mDisplay = eglGetDisplay(mPlatform->mBufferManager);
+#else
 	mPlatform->mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+#endif
+
+
 	if( !mPlatform->mDisplay )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
@@ -2006,6 +2094,12 @@ void GLES::CreateRenderingContext()
 	vc_dispmanx_update_submit_sync( dispman_update );
 	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,&mPlatform->mNativeWindow,0);
 #else
+	#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+		EGLint gbm_format;
+		eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_NATIVE_VISUAL_ID,&gbm_format);
+		mPlatform->mNativeWindow = gbm_surface_create(mPlatform->mBufferManager,mWidth, mHeight,gbm_format,GBM_BO_USE_RENDERING);
+	#endif
+
 	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,mPlatform->mNativeWindow,0);
 #endif //BROADCOM_NATIVE_WINDOW
 
