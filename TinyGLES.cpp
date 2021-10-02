@@ -657,7 +657,7 @@ GLES::GLES(bool pVerbose) :
 	{
 		THROW_MEANINGFUL_EXCEPTION("Kernel DRM driver not loaded");
 	}
-	const char* deviceFileName = "/dev/dri/card0";
+	const char* deviceFileName = "/dev/dri/card1";
 	mPlatform->mDRMFile = open(deviceFileName, O_RDWR);
 	if( mPlatform->mDRMFile < 0 )
 	{
@@ -2446,12 +2446,10 @@ void GLES::AllocateQuadBuffers()
 		idx[4] = 2 + baseIndex;
 		idx[5] = 3 + baseIndex;
 	}
-	std::clog << "1\n";
+
 	glGenBuffers(1,&mQuadBatch.IndicesBuffer);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadBatch.IndicesBuffer);
-	std::clog << "2\n";
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER,sizeofQuadIndexBuffer,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
-	std::clog << "3\n";
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,0);
 	CHECK_OGL_ERRORS();
 
@@ -2476,13 +2474,11 @@ void GLES::AllocateQuadBuffers()
 		v[3].x = -63;
 		v[3].y =  63;
 	}
-	std::clog << "4\n";
 
 	glGenBuffers(1,&mQuadBatch.VerticesBuffer);
 	glBindBuffer(GL_ARRAY_BUFFER,mQuadBatch.VerticesBuffer);
 	glBufferData(GL_ARRAY_BUFFER,sizeofQuadVertBuffer,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER,0);
-		std::clog << "5\n";
 
 	CHECK_OGL_ERRORS();
 }
