@@ -636,16 +636,16 @@ GLES::GLES(bool pVerbose) :
 	{
 		if(  mPointer.mDevice >  0 )
 		{
-			VERBOSE_MESSAGE("Opened mouse device " + MouseDeviceName);
+			VERBOSE_MESSAGE("Opened mouse device " << MouseDeviceName);
 			char name[256] = "Unknown";
 			if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
 			{
-				VERBOSE_MESSAGE("Reading mouse from: handle = " + mPointer.mDevice + " name = " + name);
+				VERBOSE_MESSAGE("Reading mouse from: handle = " << mPointer.mDevice << " name = " << name);
 			}
 		}
 		else
 		{// Not an error, may not have one connected. Depends on the usecase.
-			VERBOSE_MESSAGE("Failed to open mouse device " + MouseDeviceName);
+			VERBOSE_MESSAGE("Failed to open mouse device " << MouseDeviceName);
 		}
 	}
 
@@ -662,23 +662,22 @@ GLES::GLES(bool pVerbose) :
 	if (num_devices < 0)
 	{
 		THROW_MEANINGFUL_EXCEPTION("drmGetDevices2 failed: " + std::string(strerror(-num_devices)) );
-		return -1;
 	}
 
 	mPlatform->mDRMFile = -1;
 	for( int n = 0 ; n < num_devices && mPlatform->mDRMFile < 0 ; n++ )
 	{
-		if( device->available_nodes&(1 << DRM_NODE_PRIMARY) )
+		if( devices[n]->available_nodes&(1 << DRM_NODE_PRIMARY) )
 		{
 			// See if we can open it...
-			VERBOSE_MESSAGE("Trying DRM device " + std::string(device->nodes[DRM_NODE_PRIMARY]));
-			mPlatform->mDRMFile = open(device->nodes[DRM_NODE_PRIMARY], O_RDWR);
+			VERBOSE_MESSAGE("Trying DRM device " << std::string(devices[n]->nodes[DRM_NODE_PRIMARY]));
+			mPlatform->mDRMFile = open(devices[n]->nodes[DRM_NODE_PRIMARY], O_RDWR);
 		}
 	}
 
 	if( mPlatform->mDRMFile < 0 )
 	{
-		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to open device " + std::string(deviceFileName) );
+		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find and open direct rendering manager device" );
 	}
 #endif
 
