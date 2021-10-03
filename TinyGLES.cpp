@@ -2100,7 +2100,7 @@ void GLES::CreateRenderingContext()
 	#ifdef PLATFORM_DIRECT_RENDER_MANAGER
 		EGLint gbm_format;
 		eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_NATIVE_VISUAL_ID,&gbm_format);
-		mPlatform->mNativeWindow = gbm_surface_create(mPlatform->mBufferManager,mWidth, mHeight,gbm_format,GBM_BO_USE_RENDERING);
+		mPlatform->mNativeWindow = gbm_surface_create(mPlatform->mBufferManager,mWidth, mHeight,gbm_format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
 	#endif
 
 	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,mPlatform->mNativeWindow,0);
