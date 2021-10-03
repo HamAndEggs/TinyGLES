@@ -636,19 +636,16 @@ GLES::GLES(bool pVerbose) :
 	{
 		if(  mPointer.mDevice >  0 )
 		{
+			VERBOSE_MESSAGE("Opened mouse device " + MouseDeviceName);
 			char name[256] = "Unknown";
 			if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
 			{
-				std::clog << "Reading mouse from: handle = " << mPointer.mDevice << " name = " << name << "\n";
-			}
-			else
-			{
-				std::clog << "Open mouse device" << MouseDeviceName << "\n" ;
+				VERBOSE_MESSAGE("Reading mouse from: handle = " + mPointer.mDevice + " name = " + name);
 			}
 		}
 		else
 		{// Not an error, may not have one connected. Depends on the usecase.
-			std::clog << "Failed to open mouse device " << MouseDeviceName << "\n";
+			VERBOSE_MESSAGE("Failed to open mouse device " + MouseDeviceName);
 		}
 	}
 
@@ -657,8 +654,28 @@ GLES::GLES(bool pVerbose) :
 	{
 		THROW_MEANINGFUL_EXCEPTION("Kernel DRM driver not loaded");
 	}
-	const char* deviceFileName = "/dev/dri/card1";
-	mPlatform->mDRMFile = open(deviceFileName, O_RDWR);
+
+	// Lets go searching for a connected direct render manager device.
+	// Later I could add a param to allow user to specify this.
+	drmDevicePtr devices[8] = { NULL };
+	int num_devices = drmGetDevices2(0, devices, 8);
+	if (num_devices < 0)
+	{
+		THROW_MEANINGFUL_EXCEPTION("drmGetDevices2 failed: " + std::string(strerror(-num_devices)) );
+		return -1;
+	}
+
+	mPlatform->mDRMFile = -1;
+	for( int n = 0 ; n < num_devices && mPlatform->mDRMFile < 0 ; n++ )
+	{
+		if( device->available_nodes&(1 << DRM_NODE_PRIMARY) )
+		{
+			// See if we can open it...
+			VERBOSE_MESSAGE("Trying DRM device " + std::string(device->nodes[DRM_NODE_PRIMARY]));
+			mPlatform->mDRMFile = open(device->nodes[DRM_NODE_PRIMARY], O_RDWR);
+		}
+	}
+
 	if( mPlatform->mDRMFile < 0 )
 	{
 		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to open device " + std::string(deviceFileName) );
