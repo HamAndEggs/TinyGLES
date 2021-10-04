@@ -589,6 +589,8 @@ struct PlatformInterface
 			const uint32_t height = gbm_bo_get_height(mCurrentFrontBufferObject);
 			const uint32_t format = gbm_bo_get_format(mCurrentFrontBufferObject);
 
+			std::clog << width << "x" << height << "x" << format << "\n";
+
 			user_data = new uint32_t;
 			int ret = drmModeAddFB2(mDRMFile, width, height, format,handles, strides, offsets, user_data, 0);
 			if (ret)
