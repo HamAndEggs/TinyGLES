@@ -595,7 +595,7 @@ struct PlatformInterface
 			int ret = drmModeAddFB2(mDRMFile, width, height, format,handles, strides, offsets, user_data, 0);
 			if (ret)
 			{
-				THROW_MEANINGFUL_EXCEPTION("failed to create frame buffer " + std::string(strerror(ret)) );
+				THROW_MEANINGFUL_EXCEPTION("failed to create frame buffer " + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
 			}
 			gbm_bo_set_user_data(mCurrentFrontBufferObject,user_data, drm_fb_destroy_callback);
 			std::clog << "JIT allocating drm frame buffer " << (*user_data) << "\n";
