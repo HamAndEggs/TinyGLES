@@ -614,7 +614,7 @@ struct PlatformInterface
 		int ret = drmModeSetCrtc(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID, 0, 0,&mConnector->connector_id, 1, mModeInfo);
 		if (ret)
 		{
-			THROW_MEANINGFUL_EXCEPTION("drmModeSetCrtc failed to set mode");
+			THROW_MEANINGFUL_EXCEPTION("drmModeSetCrtc failed to set mode" + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
 		}
 	}
 
