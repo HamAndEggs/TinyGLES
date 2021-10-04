@@ -596,6 +596,7 @@ struct PlatformInterface
 				THROW_MEANINGFUL_EXCEPTION("failed to create frame buffer");
 			}
 			gbm_bo_set_user_data(mCurrentFrontBufferObject,user_data, drm_fb_destroy_callback);
+			VERBOSE_MESSAGE("JIT allocating drm frame buffer");
 		}
 		mCurrentFrontBufferID = *user_data;
 	}
