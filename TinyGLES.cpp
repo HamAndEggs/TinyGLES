@@ -607,6 +607,8 @@ struct PlatformInterface
 
 		assert(mModeEncoder);
 		assert(mConnector);
+		assert(mModeInfo);
+
 		int ret = drmModeSetCrtc(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID, 0, 0,&mConnector->connector_id, 1, mModeInfo);
 		if (ret)
 		{
@@ -2595,6 +2597,7 @@ void GLES::AllocateQuadBuffers()
 
 void GLES::PrepareFirstFrame()
 {
+	VERBOSE_MESSAGE("Preparing fist frame");
 	Clear(0,0,0);
 	eglSwapBuffers(mPlatform->mDisplay,mPlatform->mSurface);
 
