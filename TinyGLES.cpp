@@ -553,9 +553,95 @@ struct GLShader
 #ifdef PLATFORM_GLES
 struct PlatformInterface
 {
-	PlatformInterface(bool pVerbose){}
+	PlatformInterface(bool pVerbose) : mVerbose(pVerbose)
+	{
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+		if( drmAvailable() == 0 )
+		{
+			THROW_MEANINGFUL_EXCEPTION("Kernel DRM driver not loaded");
+		}
+
+		// Lets go searching for a connected direct render manager device.
+		// Later I could add a param to allow user to specify this.
+		drmDevicePtr devices[8] = { NULL };
+		int num_devices = drmGetDevices2(0, devices, 8);
+		if (num_devices < 0)
+		{
+			THROW_MEANINGFUL_EXCEPTION("drmGetDevices2 failed: " + std::string(strerror(-num_devices)) );
+		}
+
+		mDRMFile = -1;
+		for( int n = 0 ; n < num_devices && mDRMFile < 0 ; n++ )
+		{
+			if( devices[n]->available_nodes&(1 << DRM_NODE_PRIMARY) )
+			{
+				// See if we can open it...
+				VERBOSE_MESSAGE("Trying DRM device " << std::string(devices[n]->nodes[DRM_NODE_PRIMARY]));
+				mDRMFile = open(devices[n]->nodes[DRM_NODE_PRIMARY], O_RDWR);
+			}
+		}
+		drmFreeDevices(devices, num_devices);
+
+		if( mDRMFile < 0 )
+		{
+			THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find and open direct rendering manager device" );
+		}
+		drmModeRes* resources = drmModeGetResources(mDRMFile);
+		if( resources == nullptr )
+		{
+			THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode resources");
+		}
+
+		drmModeConnector* connector = nullptr;
+		for(int n = 0 ; n < resources->count_connectors && connector == nullptr ; n++ )
+		{
+			connector = drmModeGetConnector(mDRMFile, resources->connectors[n]);
+			if( connector && connector->connection != DRM_MODE_CONNECTED )
+			{// Not connected, check next one...
+				drmModeFreeConnector(connector);
+				connector = nullptr;
+			}
+		}
+		if( connector == nullptr )
+		{
+			THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode connector");
+		}
+		mConnector = connector;
+
+		for( int i = 0 ; i < connector->count_modes && mModeInfo == nullptr ; i++ )
+		{
+			if( connector->modes[i].type & DRM_MODE_TYPE_PREFERRED )
+			{// DRM really wants us to use this, this should be the best option for LCD displays.
+				mModeInfo = &connector->modes[i];
+				VERBOSE_MESSAGE("Preferred screen mode found");
+			}
+		}
+
+		if( GetWidth() == 0 || GetHeight() == 0 )
+		{
+			THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find screen mode");
+		}
+
+		// Now grab the encoder, we need it for the CRTC ID. This is display connected to the conector.
+		for( int n = 0 ; n < resources->count_encoders && mModeEncoder == nullptr ; n++ )
+		{
+			drmModeEncoder *encoder = drmModeGetEncoder(mDRMFile, resources->encoders[n]);
+			if( encoder->encoder_id == connector->encoder_id )
+			{
+				mModeEncoder = encoder;
+			}
+			else
+			{
+				drmModeFreeEncoder(encoder);
+			}
+		}
+
+		drmModeFreeResources(resources);	
+#endif
+	}
 
 #ifdef PLATFORM_DIRECT_RENDER_MANAGER
+	const bool mVerbose;
 	int mDRMFile = -1;
 	drmModeEncoder *mModeEncoder = nullptr;
 	drmModeConnector* mConnector = nullptr;
@@ -565,6 +651,9 @@ struct PlatformInterface
 	
 	uint32_t mCurrentFrontBufferID = 0;
 
+	int GetWidth()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->hdisplay;}return 0;}
+	int GetHeight()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->vdisplay;}return 0;}
+
 	static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
 	{
 		uint32_t* user_data = (uint32_t*)data;
@@ -573,7 +662,13 @@ struct PlatformInterface
 
 	void UpdateCurrentBuffer()
 	{
+		VERBOSE_MESSAGE("lock FB");
+		assert(mNativeWindow);
 		mCurrentFrontBufferObject = gbm_surface_lock_front_buffer(mNativeWindow);
+		if( mCurrentFrontBufferObject == nullptr )
+		{
+			THROW_MEANINGFUL_EXCEPTION("Failed to lock front buffer from native window.");
+		}
 
 		uint32_t* user_data = (uint32_t*)gbm_bo_get_user_data(mCurrentFrontBufferObject);
 		if( user_data == nullptr )
@@ -589,7 +684,7 @@ struct PlatformInterface
 			const uint32_t height = gbm_bo_get_height(mCurrentFrontBufferObject);
 			const uint32_t format = gbm_bo_get_format(mCurrentFrontBufferObject);
 
-			std::clog << width << "x" << height << "x" << format << "\n";
+			VERBOSE_MESSAGE(width << "x" << height << "x" << format);
 
 			user_data = new uint32_t;
 			int ret = drmModeAddFB2(mDRMFile, width, height, format,handles, strides, offsets, user_data, 0);
@@ -598,7 +693,7 @@ struct PlatformInterface
 				THROW_MEANINGFUL_EXCEPTION("failed to create frame buffer " + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
 			}
 			gbm_bo_set_user_data(mCurrentFrontBufferObject,user_data, drm_fb_destroy_callback);
-			std::clog << "JIT allocating drm frame buffer " << (*user_data) << "\n";
+			VERBOSE_MESSAGE("JIT allocating drm frame buffer " << (*user_data));
 		}
 		mCurrentFrontBufferID = *user_data;
 	}
@@ -611,6 +706,7 @@ struct PlatformInterface
 		assert(mConnector);
 		assert(mModeInfo);
 
+		std::clog << mModeEncoder->crtc_id << " " << mCurrentFrontBufferID << " " << mConnector->connector_id << "\n";
 		int ret = drmModeSetCrtc(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID, 0, 0,&mConnector->connector_id, 1, mModeInfo);
 		if (ret)
 		{
@@ -720,39 +816,6 @@ GLES::GLES(bool pVerbose) :
 			VERBOSE_MESSAGE("Failed to open mouse device " << MouseDeviceName);
 		}
 	}
-
-#ifdef PLATFORM_DIRECT_RENDER_MANAGER
-	if( drmAvailable() == 0 )
-	{
-		THROW_MEANINGFUL_EXCEPTION("Kernel DRM driver not loaded");
-	}
-
-	// Lets go searching for a connected direct render manager device.
-	// Later I could add a param to allow user to specify this.
-	drmDevicePtr devices[8] = { NULL };
-	int num_devices = drmGetDevices2(0, devices, 8);
-	if (num_devices < 0)
-	{
-		THROW_MEANINGFUL_EXCEPTION("drmGetDevices2 failed: " + std::string(strerror(-num_devices)) );
-	}
-
-	mPlatform->mDRMFile = -1;
-	for( int n = 0 ; n < num_devices && mPlatform->mDRMFile < 0 ; n++ )
-	{
-		if( devices[n]->available_nodes&(1 << DRM_NODE_PRIMARY) )
-		{
-			// See if we can open it...
-			VERBOSE_MESSAGE("Trying DRM device " << std::string(devices[n]->nodes[DRM_NODE_PRIMARY]));
-			mPlatform->mDRMFile = open(devices[n]->nodes[DRM_NODE_PRIMARY], O_RDWR);
-		}
-	}
-	drmFreeDevices(devices, num_devices);
-
-	if( mPlatform->mDRMFile < 0 )
-	{
-		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find and open direct rendering manager device" );
-	}
-#endif
 
 	FetchDisplayMode();
 	InitialiseDisplay();
@@ -1989,60 +2052,8 @@ void GLES::ProcessSystemEvents()
 void GLES::FetchDisplayMode()
 {
 #ifdef PLATFORM_DIRECT_RENDER_MANAGER
-	drmModeRes* resources = drmModeGetResources(mPlatform->mDRMFile);
-	if( resources == nullptr )
-	{
-		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode resources");
-	}
-
-	drmModeConnector* connector = nullptr;
-	for(int n = 0 ; n < resources->count_connectors && connector == nullptr ; n++ )
-	{
-		connector = drmModeGetConnector(mPlatform->mDRMFile, resources->connectors[n]);
-		if( connector && connector->connection != DRM_MODE_CONNECTED )
-		{// Not connected, check next one...
-			drmModeFreeConnector(connector);
-			connector = nullptr;
-		}
-	}
-	if( connector == nullptr )
-	{
-		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode connector");
-	}
-	mPlatform->mConnector = connector;
-
-	mWidth = mHeight = 0;
-	for( int i = 0 ; i < connector->count_modes && mWidth == 0 ; i++ )
-	{
-		if( connector->modes[i].type & DRM_MODE_TYPE_PREFERRED )
-		{// DRM really wants us to use this, this should be the best option for LCD displays.
-			mWidth = connector->modes[i].hdisplay;
-			mHeight = connector->modes[i].vdisplay;
-			mPlatform->mModeInfo = &connector->modes[i];
-		}
-	}
-
-	if( mWidth == 0 || mHeight == 0 )
-	{
-		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find screen mode");
-	}
-
-	// Now grab the encoder, we need it for the CRTC ID. This is display connected to the conector.
-	for( int n = 0 ; n < resources->count_encoders && mPlatform->mModeEncoder == nullptr ; n++ )
-	{
-		drmModeEncoder *encoder = drmModeGetEncoder(mPlatform->mDRMFile, resources->encoders[n]);
-		if( encoder->encoder_id == connector->encoder_id )
-		{
-			mPlatform->mModeEncoder = encoder;
-		}
-		else
-		{
-			drmModeFreeEncoder(encoder);
-		}
-	}
-
-	drmModeFreeConnector(connector);
-	drmModeFreeResources(resources);
+	mWidth = mPlatform->GetWidth();
+	mHeight = mPlatform->GetHeight();
 #endif
 
 #ifdef PLATFORM_EGL
@@ -2212,9 +2223,10 @@ void GLES::CreateRenderingContext()
 #else
 	#ifdef PLATFORM_DIRECT_RENDER_MANAGER
 		EGLint gbm_format;
+		
 		eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_NATIVE_VISUAL_ID,&gbm_format);
+		VERBOSE_MESSAGE("gbm_format = " << gbm_format );
 		mPlatform->mNativeWindow = gbm_surface_create(mPlatform->mBufferManager,mWidth, mHeight,gbm_format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-
 	#endif
 
 	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,mPlatform->mNativeWindow,0);
@@ -2599,8 +2611,13 @@ void GLES::AllocateQuadBuffers()
 
 void GLES::PrepareFirstFrame()
 {
-	VERBOSE_MESSAGE("Preparing fist frame");
+	VERBOSE_MESSAGE("Preparing first frame");
+
 	Clear(0,0,0);
+
+	assert(mPlatform);
+	assert(mPlatform->mDisplay);
+	assert(mPlatform->mSurface);
 	eglSwapBuffers(mPlatform->mDisplay,mPlatform->mSurface);
 
 #ifdef PLATFORM_DIRECT_RENDER_MANAGER
@@ -2683,12 +2700,12 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 	mEnableStreamUV(strstr(pVertex," a_uv0;")),
 	mEnableStreamTrans(strstr(pVertex," a_trans;"))
 {
-	VERBOSE_MESSAGE("GLShader::Create: " << mName);
+//	VERBOSE_MESSAGE("GLShader::Create: " << mName);
 
 	mVertexShader = LoadShader(GL_VERTEX_SHADER,pVertex);
 	mFragmentShader = LoadShader(GL_FRAGMENT_SHADER,pFragment);
 
-	VERBOSE_MESSAGE("vertex("<<mVertexShader<<") fragment("<<mFragmentShader<<")");
+//	VERBOSE_MESSAGE("vertex("<<mVertexShader<<") fragment("<<mFragmentShader<<")");
 
 	mShader = glCreateProgram(); // create empty OpenGL Program
 	CHECK_OGL_ERRORS();
@@ -2732,7 +2749,7 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 		THROW_MEANINGFUL_EXCEPTION(error);
 	}
 
-	VERBOSE_MESSAGE("Shader: " << mName << " Compiled ok");
+//	VERBOSE_MESSAGE("Shader: " << mName << " Compiled ok");
 
 	//Get the bits for the variables in the shader.
 	mUniforms.proj_cam = GetUniformLocation("u_proj_cam");
@@ -2766,10 +2783,10 @@ int GLShader::GetUniformLocation(const char* pName)
 
 	if( location < 0 )
 	{
-		VERBOSE_MESSAGE("Shader: " << mName << " Failed to find UniformLocation " << pName);
+//		VERBOSE_MESSAGE("Shader: " << mName << " Failed to find UniformLocation " << pName);
 	}
 
-	VERBOSE_MESSAGE("Shader: " << mName << " GetUniformLocation(" << pName << ") == " << location);
+//	VERBOSE_MESSAGE("Shader: " << mName << " GetUniformLocation(" << pName << ") == " << location);
 
 	return location;
 
@@ -2779,7 +2796,7 @@ void GLShader::BindAttribLocation(int location,const char* pName)
 {
 	glBindAttribLocation(mShader, location,pName);
 	CHECK_OGL_ERRORS();
-	VERBOSE_MESSAGE("Shader: " << mName << " AttribLocation("<< pName << "," << location << ")");
+//	VERBOSE_MESSAGE("Shader: " << mName << " AttribLocation("<< pName << "," << location << ")");
 }
 
 void GLShader::Enable(const float projInvcam[4][4])
