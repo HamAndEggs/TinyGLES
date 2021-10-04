@@ -556,8 +556,75 @@ struct PlatformInterface
 	PlatformInterface(bool pVerbose){}
 
 #ifdef PLATFORM_DIRECT_RENDER_MANAGER
-	int mDRMFile = 0;
+	int mDRMFile = -1;
+	drmModeEncoder *mModeEncoder = nullptr;
+	drmModeConnector* mConnector = nullptr;
+	drmModeModeInfo* mModeInfo = nullptr;
 	struct gbm_device *mBufferManager = nullptr;
+	struct gbm_bo *mCurrentFrontBufferObject = nullptr;
+	
+	uint32_t mCurrentFrontBufferID = 0;
+
+	static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
+	{
+		uint32_t* user_data = (uint32_t*)data;
+		delete user_data;
+	}
+
+	void UpdateCurrentBuffer()
+	{
+		mCurrentFrontBufferObject = gbm_surface_lock_front_buffer(mNativeWindow);
+
+		uint32_t* user_data = (uint32_t*)gbm_bo_get_user_data(mCurrentFrontBufferObject);
+		if( user_data == nullptr )
+		{
+			// Annoying JIT allocation. Should only happen twice.
+			// Should look at removing the need for the libgbm
+
+			const uint32_t handles[4] = {gbm_bo_get_handle(mCurrentFrontBufferObject).u32,0,0,0};
+			const uint32_t strides[4] = {gbm_bo_get_stride(mCurrentFrontBufferObject),0,0,0};
+			const uint32_t offsets[4] = {0,0,0,0};
+
+			const uint32_t width = gbm_bo_get_width(mCurrentFrontBufferObject);
+			const uint32_t height = gbm_bo_get_height(mCurrentFrontBufferObject);
+			const uint32_t format = gbm_bo_get_format(mCurrentFrontBufferObject);
+
+			user_data = new uint32_t;
+			int ret = drmModeAddFB2(mDRMFile, width, height, format,handles, strides, offsets, user_data, 0);
+			if (ret)
+			{
+				THROW_MEANINGFUL_EXCEPTION("failed to create frame buffer");
+			}
+			gbm_bo_set_user_data(mCurrentFrontBufferObject,user_data, drm_fb_destroy_callback);
+		}
+		mCurrentFrontBufferID = *user_data;
+	}
+
+	void PrepareFirstFrame()
+	{
+		PrepareFirstFrame();
+
+		assert(mModeEncoder);
+		assert(mConnector);
+		int ret = drmModeSetCrtc(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID, 0, 0,&mConnector->connector_id, 1, mModeInfo);
+		if (ret)
+		{
+			THROW_MEANINGFUL_EXCEPTION("drmModeSetCrtc failed to set mode");
+		}
+	}
+
+	void DRMSwapBuffers()
+	{
+		UpdateCurrentBuffer();
+		int ret = drmModePageFlip(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID,DRM_MODE_PAGE_FLIP_ASYNC,NULL);
+		if (ret)
+		{
+			THROW_MEANINGFUL_EXCEPTION("drmModePageFlip failed to queue page flip");
+		}
+		gbm_surface_release_buffer(mNativeWindow,mCurrentFrontBufferObject);
+	}
+
+
 #endif
 
 	EGLDisplay mDisplay = nullptr;				//!<GL display
@@ -674,6 +741,7 @@ GLES::GLES(bool pVerbose) :
 			mPlatform->mDRMFile = open(devices[n]->nodes[DRM_NODE_PRIMARY], O_RDWR);
 		}
 	}
+	drmFreeDevices(devices, num_devices);
 
 	if( mPlatform->mDRMFile < 0 )
 	{
@@ -691,6 +759,7 @@ GLES::GLES(bool pVerbose) :
 	BuildPixelFontTexture();
 	InitFreeTypeFont();
 	AllocateQuadBuffers();
+	PrepareFirstFrame();
 
 	VERBOSE_MESSAGE("GLES Ready");
 }
@@ -753,6 +822,8 @@ GLES::~GLES()
 #ifdef PLATFORM_DIRECT_RENDER_MANAGER
 	gbm_surface_destroy(mPlatform->mNativeWindow);
 	gbm_device_destroy(mPlatform->mBufferManager);
+	drmModeFreeEncoder(mPlatform->mModeEncoder);
+	drmModeFreeConnector(mPlatform->mConnector);
 	close(mPlatform->mDRMFile);
 #endif
 
@@ -775,6 +846,11 @@ void GLES::EndFrame()
 {
 	eglSwapBuffers(mPlatform->mDisplay,mPlatform->mSurface);
 	glFlush();// This makes sure the display is fully up to date before we allow them to interact with any kind of UI. This is the specified use of this function.
+
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+	mPlatform->DRMSwapBuffers();
+#endif
+
 	ProcessSystemEvents();
 }
 
@@ -1928,6 +2004,7 @@ void GLES::FetchDisplayMode()
 	{
 		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode connector");
 	}
+	mPlatform->mConnector = connector;
 
 	mWidth = mHeight = 0;
 	for( int i = 0 ; i < connector->count_modes && mWidth == 0 ; i++ )
@@ -1936,12 +2013,27 @@ void GLES::FetchDisplayMode()
 		{// DRM really wants us to use this, this should be the best option for LCD displays.
 			mWidth = connector->modes[i].hdisplay;
 			mHeight = connector->modes[i].vdisplay;
+			mPlatform->mModeInfo = &connector->modes[i];
 		}
 	}
 
 	if( mWidth == 0 || mHeight == 0 )
 	{
 		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find screen mode");
+	}
+
+	// Now grab the encoder, we need it for the CRTC ID. This is display connected to the conector.
+	for( int n = 0 ; n < resources->count_encoders && mPlatform->mModeEncoder == nullptr ; n++ )
+	{
+		drmModeEncoder *encoder = drmModeGetEncoder(mPlatform->mDRMFile, resources->encoders[n]);
+		if( encoder->encoder_id == connector->encoder_id )
+		{
+			mPlatform->mModeEncoder = encoder;
+		}
+		else
+		{
+			drmModeFreeEncoder(encoder);
+		}
 	}
 
 	drmModeFreeConnector(connector);
@@ -2117,6 +2209,7 @@ void GLES::CreateRenderingContext()
 		EGLint gbm_format;
 		eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_NATIVE_VISUAL_ID,&gbm_format);
 		mPlatform->mNativeWindow = gbm_surface_create(mPlatform->mBufferManager,mWidth, mHeight,gbm_format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+
 	#endif
 
 	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,mPlatform->mNativeWindow,0);
@@ -2497,6 +2590,17 @@ void GLES::AllocateQuadBuffers()
 	glBindBuffer(GL_ARRAY_BUFFER,0);
 
 	CHECK_OGL_ERRORS();
+}
+
+void GLES::PrepareFirstFrame()
+{
+	Clear(0,0,0);
+	eglSwapBuffers(mPlatform->mDisplay,mPlatform->mSurface);
+
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+	assert(mPlatform);
+	mPlatform->PrepareFirstFrame();
+#endif
 }
 
 void GLES::VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer)

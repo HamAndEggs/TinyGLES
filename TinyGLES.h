@@ -553,6 +553,7 @@ private:
 	void BuildPixelFontTexture();
 	void InitFreeTypeFont();
 	void AllocateQuadBuffers();
+	void PrepareFirstFrame();
 
 	void VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer);
 	void TexCoordPtr(int pNum_coord, uint32_t pType,const void* pPointer);
