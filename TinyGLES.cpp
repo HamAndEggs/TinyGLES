@@ -603,7 +603,7 @@ struct PlatformInterface
 
 	void PrepareFirstFrame()
 	{
-		PrepareFirstFrame();
+		UpdateCurrentBuffer();
 
 		assert(mModeEncoder);
 		assert(mConnector);
