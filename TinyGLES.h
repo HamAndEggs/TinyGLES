@@ -204,22 +204,14 @@ public:
 	typedef std::function<void(const SystemEventData& pEvent)> SystemEventHandler;
 
 	/**
-	 * @brief Creates and opens a GLES object. Throws an excpetion if it fails.
+	 * @brief Creates and opens a GLES object. Throws an exception if it fails.
 	 */
-	GLES(bool pVerbose);
+	GLES();
 
 	/**
 	 * @brief Clean up code. You must delete your object on exit!
 	 */
 	~GLES();
-
-	/**
-	 * @brief Get the setting for Verbose debug output.
-	 * 
-	 * @return true 
-	 * @return false 
-	 */
-	bool GetVerbose()const{return mVerbose;}
 
 	/**
 		@brief Returns the width of the frame buffer.
@@ -484,7 +476,7 @@ public:
 // Free type rendering
 #ifdef USE_FREETYPEFONTS
 
-	uint32_t FontLoad(const std::string& pFontName,int pPixelHeight = 40,bool pVerbose = false);
+	uint32_t FontLoad(const std::string& pFontName,int pPixelHeight = 40);
 	void FontDelete(uint32_t pFont);
 
 	void FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText);
@@ -560,7 +552,6 @@ private:
 	void ColourPtr(int pNum_coord,const uint8_t* pPointer);
 	void SetUserSpaceStreamPtr(uint32_t pStream,int pNum_coord, uint32_t pType,const void* pPointer);
 
-	const bool mVerbose;
 	bool mKeepGoing = true;								//!< Set to false by the application requesting to exit or the user doing ctrl + c.
 
 	int mWidth = 0;

@@ -14,7 +14,7 @@ int main(int argc, char *argv[])
     std::cout << "Build date " << APP_BUILD_DATE << '\n';
     std::cout << "Build time " << APP_BUILD_TIME << '\n';
 
-    tinygles::GLES GL(true);
+    tinygles::GLES GL;
 
     const std::string faceName("./Blenda Script.otf");
     const uint32_t aFont = GL.FontLoad(faceName,40,true);

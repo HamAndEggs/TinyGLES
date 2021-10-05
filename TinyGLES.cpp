@@ -68,6 +68,7 @@
 	#include <xf86drm.h>
 	#include <xf86drmMode.h>
 	#include <gbm.h>
+	#include <drm_fourcc.h>
 
 	#define EGL_NO_X11
 	#define MESA_EGL_NO_X11_HEADERS
@@ -96,7 +97,18 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 	#define CHECK_OGL_ERRORS()
 #endif
 
-#define VERBOSE_MESSAGE(THE_MESSAGE__)	{if(mVerbose){std::clog << THE_MESSAGE__ << "\n";}}
+#ifdef VERBOSE_BUILD
+	#define VERBOSE_MESSAGE(THE_MESSAGE__)	{std::clog << THE_MESSAGE__ << "\n";}
+#else
+	#define VERBOSE_MESSAGE(THE_MESSAGE__)
+#endif
+
+#ifdef VERBOSE_SHADER_BUILD
+	#define VERBOSE_SHADER_MESSAGE(THE_MESSAGE__)	{std::clog << "Shader: " << THE_MESSAGE__ << "\n";}
+#else
+	#define VERBOSE_SHADER_MESSAGE(THE_MESSAGE__)
+#endif
+
 
 #define THROW_MEANINGFUL_EXCEPTION(THE_MESSAGE__)	{throw std::runtime_error("At: " + std::to_string(__LINE__) + " In " + std::string(__FILE__) + " : " + std::string(THE_MESSAGE__));}
 
@@ -477,7 +489,7 @@ struct FreeTypeFont
 		}uv[2];
 	};
 
-	FreeTypeFont(FT_Face pFontFace,int pPixelHeight,bool pVerbose);
+	FreeTypeFont(FT_Face pFontFace,int pPixelHeight);
 	~FreeTypeFont();
 
 	/**
@@ -494,7 +506,6 @@ struct FreeTypeFont
 			std::function<void(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels)> pFillTexture);
 
 	const std::string mFontName; //<! Helps with debugging.
-	const bool mVerbose;
 	FT_Face mFace;								//<! The font we are rending from.
 	uint32_t mTexture;							//<! This is the texture that the glyphs are in so we can render using GL and quads. It's crud but works. ;)
 	std::array<FreeTypeFont::Glyph,96>mGlyphs;	//<! Meta data needed to render the characters.
@@ -515,7 +526,7 @@ struct FreeTypeFont
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 struct GLShader
 {
-	GLShader(const std::string& pName,const char* pVertex, const char* pFragment,bool pVerbose);
+	GLShader(const std::string& pName,const char* pVertex, const char* pFragment);
 	~GLShader();
 
 	int GetUniformLocation(const char* pName);
@@ -530,7 +541,6 @@ struct GLShader
 	bool GetUsesTransform()const{return mUniforms.trans > -1;}
 
 	const std::string mName;	//!< Mainly to help debugging.
-	const bool mVerbose;
 	const bool mEnableStreamUV;
 	const bool mEnableStreamTrans;
 
@@ -549,11 +559,11 @@ struct GLShader
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// GLES 2.0 hidden definition.
-#ifdef PLATFORM_GLES
+// EGL hidden definition.
+#ifdef PLATFORM_EGL
 struct PlatformInterface
 {
-	PlatformInterface(bool pVerbose) : mVerbose(pVerbose)
+	PlatformInterface()
 	{
 #ifdef PLATFORM_DIRECT_RENDER_MANAGER
 		if( drmAvailable() == 0 )
@@ -641,13 +651,14 @@ struct PlatformInterface
 	}
 
 #ifdef PLATFORM_DIRECT_RENDER_MANAGER
-	const bool mVerbose;
+
 	int mDRMFile = -1;
 	drmModeEncoder *mModeEncoder = nullptr;
 	drmModeConnector* mConnector = nullptr;
 	drmModeModeInfo* mModeInfo = nullptr;
 	struct gbm_device *mBufferManager = nullptr;
 	struct gbm_bo *mCurrentFrontBufferObject = nullptr;
+	uint32_t mFOURCC_Format = DRM_FORMAT_XRGB8888;// Hard coded for now. But I should be able to ask what to use. But DRM don't seem to have that...
 	
 	uint32_t mCurrentFrontBufferID = 0;
 
@@ -662,7 +673,6 @@ struct PlatformInterface
 
 	void UpdateCurrentBuffer()
 	{
-		VERBOSE_MESSAGE("lock FB");
 		assert(mNativeWindow);
 		mCurrentFrontBufferObject = gbm_surface_lock_front_buffer(mNativeWindow);
 		if( mCurrentFrontBufferObject == nullptr )
@@ -680,14 +690,8 @@ struct PlatformInterface
 			const uint32_t strides[4] = {gbm_bo_get_stride(mCurrentFrontBufferObject),0,0,0};
 			const uint32_t offsets[4] = {0,0,0,0};
 
-			const uint32_t width = gbm_bo_get_width(mCurrentFrontBufferObject);
-			const uint32_t height = gbm_bo_get_height(mCurrentFrontBufferObject);
-			const uint32_t format = gbm_bo_get_format(mCurrentFrontBufferObject);
-
-			VERBOSE_MESSAGE(width << "x" << height << "x" << format);
-
 			user_data = new uint32_t;
-			int ret = drmModeAddFB2(mDRMFile, width, height, format,handles, strides, offsets, user_data, 0);
+			int ret = drmModeAddFB2(mDRMFile, GetWidth(), GetHeight(), mFOURCC_Format,handles, strides, offsets, user_data, 0);
 			if (ret)
 			{
 				THROW_MEANINGFUL_EXCEPTION("failed to create frame buffer " + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
@@ -744,6 +748,184 @@ struct PlatformInterface
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// DRM Direct Render Manager hidden definition.
+// Used for more model systems like RPi4 and proper GL / GLES implementations.
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+struct PlatformInterface
+{
+	int mDRMFile = -1;
+	drmModeEncoder *mModeEncoder = nullptr;
+	drmModeConnector* mConnector = nullptr;
+	drmModeModeInfo* mModeInfo = nullptr;
+	struct gbm_device *mBufferManager = nullptr;
+	struct gbm_bo *mCurrentFrontBufferObject = nullptr;
+	uint32_t mFOURCC_Format = DRM_FORMAT_XRGB8888;// Hard coded for now. But I should be able to ask what to use. But DRM don't seem to have that...
+	uint32_t mCurrentFrontBufferID = 0;
+
+	EGLDisplay mDisplay = nullptr;				//!<GL display
+	EGLSurface mSurface = nullptr;				//!<GL rendering surface
+	EGLContext mContext = nullptr;				//!<GL rendering context
+	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
+
+	struct gbm_surface *mNativeWindow = nullptr;
+
+	PlatformInterface()
+	{
+		if( drmAvailable() == 0 )
+		{
+			THROW_MEANINGFUL_EXCEPTION("Kernel DRM driver not loaded");
+		}
+
+		// Lets go searching for a connected direct render manager device.
+		// Later I could add a param to allow user to specify this.
+		drmDevicePtr devices[8] = { NULL };
+		int num_devices = drmGetDevices2(0, devices, 8);
+		if (num_devices < 0)
+		{
+			THROW_MEANINGFUL_EXCEPTION("drmGetDevices2 failed: " + std::string(strerror(-num_devices)) );
+		}
+
+		mDRMFile = -1;
+		for( int n = 0 ; n < num_devices && mDRMFile < 0 ; n++ )
+		{
+			if( devices[n]->available_nodes&(1 << DRM_NODE_PRIMARY) )
+			{
+				// See if we can open it...
+				VERBOSE_MESSAGE("Trying DRM device " << std::string(devices[n]->nodes[DRM_NODE_PRIMARY]));
+				mDRMFile = open(devices[n]->nodes[DRM_NODE_PRIMARY], O_RDWR);
+			}
+		}
+		drmFreeDevices(devices, num_devices);
+
+		if( mDRMFile < 0 )
+		{
+			THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find and open direct rendering manager device" );
+		}
+		drmModeRes* resources = drmModeGetResources(mDRMFile);
+		if( resources == nullptr )
+		{
+			THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode resources");
+		}
+
+		drmModeConnector* connector = nullptr;
+		for(int n = 0 ; n < resources->count_connectors && connector == nullptr ; n++ )
+		{
+			connector = drmModeGetConnector(mDRMFile, resources->connectors[n]);
+			if( connector && connector->connection != DRM_MODE_CONNECTED )
+			{// Not connected, check next one...
+				drmModeFreeConnector(connector);
+				connector = nullptr;
+			}
+		}
+		if( connector == nullptr )
+		{
+			THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode connector");
+		}
+		mConnector = connector;
+
+		for( int i = 0 ; i < connector->count_modes && mModeInfo == nullptr ; i++ )
+		{
+			if( connector->modes[i].type & DRM_MODE_TYPE_PREFERRED )
+			{// DRM really wants us to use this, this should be the best option for LCD displays.
+				mModeInfo = &connector->modes[i];
+				VERBOSE_MESSAGE("Preferred screen mode found");
+			}
+		}
+
+		if( GetWidth() == 0 || GetHeight() == 0 )
+		{
+			THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find screen mode");
+		}
+
+		// Now grab the encoder, we need it for the CRTC ID. This is display connected to the conector.
+		for( int n = 0 ; n < resources->count_encoders && mModeEncoder == nullptr ; n++ )
+		{
+			drmModeEncoder *encoder = drmModeGetEncoder(mDRMFile, resources->encoders[n]);
+			if( encoder->encoder_id == connector->encoder_id )
+			{
+				mModeEncoder = encoder;
+			}
+			else
+			{
+				drmModeFreeEncoder(encoder);
+			}
+		}
+
+		drmModeFreeResources(resources);	
+	}
+
+
+	int GetWidth()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->hdisplay;}return 0;}
+	int GetHeight()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->vdisplay;}return 0;}
+
+	static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
+	{
+		uint32_t* user_data = (uint32_t*)data;
+		delete user_data;
+	}
+
+	void UpdateCurrentBuffer()
+	{
+		assert(mNativeWindow);
+		mCurrentFrontBufferObject = gbm_surface_lock_front_buffer(mNativeWindow);
+		if( mCurrentFrontBufferObject == nullptr )
+		{
+			THROW_MEANINGFUL_EXCEPTION("Failed to lock front buffer from native window.");
+		}
+
+		uint32_t* user_data = (uint32_t*)gbm_bo_get_user_data(mCurrentFrontBufferObject);
+		if( user_data == nullptr )
+		{
+			// Annoying JIT allocation. Should only happen twice.
+			// Should look at removing the need for the libgbm
+
+			const uint32_t handles[4] = {gbm_bo_get_handle(mCurrentFrontBufferObject).u32,0,0,0};
+			const uint32_t strides[4] = {gbm_bo_get_stride(mCurrentFrontBufferObject),0,0,0};
+			const uint32_t offsets[4] = {0,0,0,0};
+
+			user_data = new uint32_t;
+			int ret = drmModeAddFB2(mDRMFile, GetWidth(), GetHeight(), mFOURCC_Format,handles, strides, offsets, user_data, 0);
+			if (ret)
+			{
+				THROW_MEANINGFUL_EXCEPTION("failed to create frame buffer " + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
+			}
+			gbm_bo_set_user_data(mCurrentFrontBufferObject,user_data, drm_fb_destroy_callback);
+			VERBOSE_MESSAGE("JIT allocating drm frame buffer " << (*user_data));
+		}
+		mCurrentFrontBufferID = *user_data;
+	}
+
+	void PrepareFirstFrame()
+	{
+		UpdateCurrentBuffer();
+
+		assert(mModeEncoder);
+		assert(mConnector);
+		assert(mModeInfo);
+
+		std::clog << mModeEncoder->crtc_id << " " << mCurrentFrontBufferID << " " << mConnector->connector_id << "\n";
+		int ret = drmModeSetCrtc(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID, 0, 0,&mConnector->connector_id, 1, mModeInfo);
+		if (ret)
+		{
+			THROW_MEANINGFUL_EXCEPTION("drmModeSetCrtc failed to set mode" + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
+		}
+	}
+
+	void DRMSwapBuffers()
+	{
+		UpdateCurrentBuffer();
+		int ret = drmModePageFlip(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID,DRM_MODE_PAGE_FLIP_ASYNC,NULL);
+		if (ret)
+		{
+			THROW_MEANINGFUL_EXCEPTION("drmModePageFlip failed to queue page flip");
+		}
+		gbm_surface_release_buffer(mNativeWindow,mCurrentFrontBufferObject);
+	}
+
+};
+#endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // X11 GL emulation hidden definition.
 // Implementation is at the bottom of the source file.
 // This code is intended to allow development on a full desktop system for applications that
@@ -756,7 +938,6 @@ struct PlatformInterface
  */
 struct PlatformInterface
 {
-	const bool mVerbose;
 	Display *mXDisplay = nullptr;
 	Window mWindow = 0;
 	Atom mDeleteMessage;
@@ -766,7 +947,7 @@ struct PlatformInterface
 
 	bool mWindowReady;
 
-	PlatformInterface(bool pVerbose);
+	PlatformInterface();
 	~PlatformInterface();
 
 	/**
@@ -790,9 +971,8 @@ struct PlatformInterface
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // GLES Implementation
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-GLES::GLES(bool pVerbose) :
-	mVerbose(pVerbose),
-	mPlatform(std::make_unique<PlatformInterface>(pVerbose)),
+GLES::GLES() :
+	mPlatform(std::make_unique<PlatformInterface>()),
 	mWorkBuffers(std::make_unique<WorkBuffers>())
 {
 	// Lets hook ctrl + c.
@@ -800,22 +980,21 @@ GLES::GLES(bool pVerbose) :
 
 	const char* MouseDeviceName = "/dev/input/event0";
 	mPointer.mDevice = open(MouseDeviceName,O_RDONLY|O_NONBLOCK); // May fail, this is ok. They may not have one.
-	if( mVerbose )
+#ifdef VERBOSE_BUILD
+	if(  mPointer.mDevice >  0 )
 	{
-		if(  mPointer.mDevice >  0 )
+		VERBOSE_MESSAGE("Opened mouse device " << MouseDeviceName);
+		char name[256] = "Unknown";
+		if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
 		{
-			VERBOSE_MESSAGE("Opened mouse device " << MouseDeviceName);
-			char name[256] = "Unknown";
-			if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
-			{
-				VERBOSE_MESSAGE("Reading mouse from: handle = " << mPointer.mDevice << " name = " << name);
-			}
-		}
-		else
-		{// Not an error, may not have one connected. Depends on the usecase.
-			VERBOSE_MESSAGE("Failed to open mouse device " << MouseDeviceName);
+			VERBOSE_MESSAGE("Reading mouse from: handle = " << mPointer.mDevice << " name = " << name);
 		}
 	}
+	else
+	{// Not an error, may not have one connected. Depends on the usecase.
+		VERBOSE_MESSAGE("Failed to open mouse device " << MouseDeviceName);
+	}
+#endif
 
 	FetchDisplayMode();
 	InitialiseDisplay();
@@ -1631,14 +1810,13 @@ uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,boo
 	if( scaleFrom.x == -1 || scaleFrom.y == -1 || scaleTo.x == -1 || scaleTo.y == -1 || 
 		fillFrom.x  == -1 || fillFrom.y  == -1 || fillTo.x  == -1 || fillTo.y  == -1 )
 	{
-		if( mVerbose )
-		{
-			std::clog << "Nine patch failure,\n";
-			std::clog << "   Scalable X " << scaleFrom.x << " " << scaleTo.x << "\n";
-			std::clog << "   Scalable Y " << scaleFrom.y << " " << scaleTo.y << "\n";
-			std::clog << "   Fillable X " << fillFrom.x << " " << fillTo.x << "\n";
-			std::clog << "   Fillable Y " << fillFrom.y << " " << fillTo.y << "\n";
-		}
+#ifdef VERBOSE_BUILD
+		std::clog << "Nine patch failure,\n";
+		std::clog << "   Scalable X " << scaleFrom.x << " " << scaleTo.x << "\n";
+		std::clog << "   Scalable Y " << scaleFrom.y << " " << scaleTo.y << "\n";
+		std::clog << "   Fillable X " << fillFrom.x << " " << fillTo.x << "\n";
+		std::clog << "   Fillable Y " << fillFrom.y << " " << fillTo.y << "\n";
+#endif
 		THROW_MEANINGFUL_EXCEPTION("Nine patch edge definition invlaid, not all scaling and filling information found. Is it a nine patch texture?");
 	}
 
@@ -1844,7 +2022,7 @@ int GLES::FontGetPrintfWidth(const char* pFmt,...)
 //*******************************************
 // Free type rendering
 #ifdef USE_FREETYPEFONTS
-uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerbose)
+uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight)
 {
 	FT_Face loadedFace;
 	if( FT_New_Face(mFreetype,pFontName.c_str(),0,&loadedFace) != 0 )
@@ -1853,7 +2031,7 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 	}
 
 	const uint32_t fontID = mNextFontID++;
-	mFreeTypeFonts[fontID] = std::make_unique<FreeTypeFont>(loadedFace,pPixelHeight,pVerbose);
+	mFreeTypeFonts[fontID] = std::make_unique<FreeTypeFont>(loadedFace,pPixelHeight);
 
 	// Now we need to prepare the texture cache.
 	auto& font = mFreeTypeFonts.at(fontID);
@@ -2001,11 +2179,12 @@ void GLES::ProcessSystemEvents()
 		while( read(mPointer.mDevice,&ev,sizeof(ev)) > 0 )
 		{
 			// EV_SYN is a seperator of events.
-			if( mVerbose && ev.type != EV_ABS && ev.type != EV_KEY && ev.type != EV_SYN )
+#ifdef VERBOSE_BUILD
+			if( ev.type != EV_ABS && ev.type != EV_KEY && ev.type != EV_SYN )
 			{// Anything I missed? 
 				std::cout << std::hex << ev.type << " " << ev.code << " " << ev.value << "\n";
 			}
-
+#endif
 			switch( ev.type )
 			{
 			case EV_KEY:
@@ -2222,11 +2401,7 @@ void GLES::CreateRenderingContext()
 	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,&mPlatform->mNativeWindow,0);
 #else
 	#ifdef PLATFORM_DIRECT_RENDER_MANAGER
-		EGLint gbm_format;
-		
-		eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_NATIVE_VISUAL_ID,&gbm_format);
-		VERBOSE_MESSAGE("gbm_format = " << gbm_format );
-		mPlatform->mNativeWindow = gbm_surface_create(mPlatform->mBufferManager,mWidth, mHeight,gbm_format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+		mPlatform->mNativeWindow = gbm_surface_create(mPlatform->mBufferManager,mWidth, mHeight,mPlatform->mFOURCC_Format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
 	#endif
 
 	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,mPlatform->mNativeWindow,0);
@@ -2293,7 +2468,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.ColourOnly = std::make_unique<GLShader>("ColourOnly",ColourOnly_VS,ColourOnly_PS,mVerbose);
+	mShaders.ColourOnly = std::make_unique<GLShader>("ColourOnly",ColourOnly_VS,ColourOnly_PS);
 
 	const char* TextureColour_VS = R"(
 		precision highp float;
@@ -2322,7 +2497,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.TextureColour = std::make_unique<GLShader>("TextureColour",TextureColour_VS,TextureColour_PS,mVerbose);
+	mShaders.TextureColour = std::make_unique<GLShader>("TextureColour",TextureColour_VS,TextureColour_PS);
 
 	const char* TextureAlphaOnly_VS = R"(
 		precision highp float;
@@ -2351,7 +2526,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.TextureAlphaOnly = std::make_unique<GLShader>("TextureAlphaOnly",TextureAlphaOnly_VS,TextureAlphaOnly_PS,mVerbose);
+	mShaders.TextureAlphaOnly = std::make_unique<GLShader>("TextureAlphaOnly",TextureAlphaOnly_VS,TextureAlphaOnly_PS);
 	
 	const char* SpriteShader_VS = R"(
 		precision highp float;
@@ -2381,7 +2556,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.SpriteShader = std::make_unique<GLShader>("SpriteShader",SpriteShader_VS,SpriteShader_PS,mVerbose);
+	mShaders.SpriteShader = std::make_unique<GLShader>("SpriteShader",SpriteShader_VS,SpriteShader_PS);
 
 	const char* QuadBatchShader_VS = R"(
 		precision highp float;
@@ -2436,7 +2611,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.QuadBatchShader = std::make_unique<GLShader>("QuadBatchShader",QuadBatchShader_VS,QuadBatchShader_PS,mVerbose);
+	mShaders.QuadBatchShader = std::make_unique<GLShader>("QuadBatchShader",QuadBatchShader_VS,QuadBatchShader_PS);
 }
 
 void GLES::SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
@@ -2471,7 +2646,7 @@ void GLES::EnableShader(TinyShader pShader)
 	assert( pShader );
 	if( mShaders.CurrentShader != pShader )
 	{
-//		VERBOSE_MESSAGE("Enabling shader " << pShader->mName << " in frame " << mDiagnostics.frameNumber );
+		VERBOSE_SHADER_MESSAGE("Enabling shader " << pShader->mName << " in frame " << mDiagnostics.frameNumber );
 		mShaders.CurrentShader = pShader;
 		pShader->Enable(mMatrices.projection);
 		pShader->SetTransform(mMatrices.transform);
@@ -2694,18 +2869,17 @@ void GLES::CtrlHandler(int SigNum)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // GLES Shader definition
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFragment,bool pVerbose) :
+GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFragment) :
 	mName(pName),
-	mVerbose(pVerbose),
 	mEnableStreamUV(strstr(pVertex," a_uv0;")),
 	mEnableStreamTrans(strstr(pVertex," a_trans;"))
 {
-//	VERBOSE_MESSAGE("GLShader::Create: " << mName);
+	VERBOSE_SHADER_MESSAGE("Creating " << mName);
 
 	mVertexShader = LoadShader(GL_VERTEX_SHADER,pVertex);
 	mFragmentShader = LoadShader(GL_FRAGMENT_SHADER,pFragment);
 
-//	VERBOSE_MESSAGE("vertex("<<mVertexShader<<") fragment("<<mFragmentShader<<")");
+	VERBOSE_SHADER_MESSAGE("vertex("<<mVertexShader<<") fragment("<<mFragmentShader<<")");
 
 	mShader = glCreateProgram(); // create empty OpenGL Program
 	CHECK_OGL_ERRORS();
@@ -2749,7 +2923,7 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 		THROW_MEANINGFUL_EXCEPTION(error);
 	}
 
-//	VERBOSE_MESSAGE("Shader: " << mName << " Compiled ok");
+	VERBOSE_SHADER_MESSAGE("Shader " << mName << " Compiled ok");
 
 	//Get the bits for the variables in the shader.
 	mUniforms.proj_cam = GetUniformLocation("u_proj_cam");
@@ -2763,7 +2937,7 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 
 GLShader::~GLShader()
 {
-	VERBOSE_MESSAGE("Deleting shader " << mName << " " << mShader);
+	VERBOSE_SHADER_MESSAGE("Deleting shader " << mName << " " << mShader);
 	
 	glDeleteShader(mVertexShader);
 	CHECK_OGL_ERRORS();
@@ -2783,10 +2957,10 @@ int GLShader::GetUniformLocation(const char* pName)
 
 	if( location < 0 )
 	{
-//		VERBOSE_MESSAGE("Shader: " << mName << " Failed to find UniformLocation " << pName);
+		VERBOSE_SHADER_MESSAGE( mName << " Failed to find UniformLocation " << pName);
 	}
 
-//	VERBOSE_MESSAGE("Shader: " << mName << " GetUniformLocation(" << pName << ") == " << location);
+	VERBOSE_SHADER_MESSAGE( mName << " GetUniformLocation(" << pName << ") == " << location);
 
 	return location;
 
@@ -2796,12 +2970,12 @@ void GLShader::BindAttribLocation(int location,const char* pName)
 {
 	glBindAttribLocation(mShader, location,pName);
 	CHECK_OGL_ERRORS();
-//	VERBOSE_MESSAGE("Shader: " << mName << " AttribLocation("<< pName << "," << location << ")");
+	VERBOSE_SHADER_MESSAGE( mName << " AttribLocation("<< pName << "," << location << ")");
 }
 
 void GLShader::Enable(const float projInvcam[4][4])
 {
-//	VERBOSE_MESSAGE("shader: " << mName << " Enabling shader " << mShader );
+	VERBOSE_SHADER_MESSAGE(mName << " Enabling shader " << mShader );
 	assert(mShader);
     glUseProgram(mShader);
     CHECK_OGL_ERRORS();
@@ -2955,9 +3129,8 @@ void ReadOGLErrors(const char *pSource_file_name,int pLine_number)
  * One note, I don't do localisation. ASCII here. If you need all the characters then maybe add yourself or use a commercial grade GL engine. :) localisation is a BIG job!
  * Rendering is done in the GL code, this class is more of just a container.
  */
-FreeTypeFont::FreeTypeFont(FT_Face pFontFace,int pPixelHeight,bool pVerbose) :
+FreeTypeFont::FreeTypeFont(FT_Face pFontFace,int pPixelHeight) :
 	mFontName(pFontFace->family_name),
-	mVerbose(pVerbose),
 	mFace(pFontFace)
 {
 	if( FT_Set_Pixel_Sizes(mFace,0,pPixelHeight) == 0 )
@@ -3199,8 +3372,7 @@ void FreeTypeFont::BuildTexture(
 /**
  * @brief The TinyGLES codebase is expected to be used for a system not running X11. But to aid development there is an option to 'emulate' a frame buffer with an X11 window.
  */
-PlatformInterface::PlatformInterface(bool pVerbose):
-	mVerbose(pVerbose),
+PlatformInterface::PlatformInterface():
 	mXDisplay(NULL),
 	mWindow(0),
 	mWindowReady(false)
