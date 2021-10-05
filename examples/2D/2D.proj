@@ -31,6 +31,7 @@
             "define": [
                 "DEBUG_BUILD",
                 "BROADCOM_NATIVE_WINDOW",
+                "PLATFORM_EGL",
                 "PLATFORM_GLES"
             ]
         },
@@ -56,8 +57,10 @@
             ],
             "define": [
                 "DEBUG_BUILD",
+                "PLATFORM_DIRECT_RENDER_MANAGER",
                 "PLATFORM_GLES",
-                "PLATFORM_DIRECT_RENDER_MANAGER"
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD"
             ]
         },
         "X11-debug":

@@ -499,28 +499,6 @@ private:
 	void ProcessSystemEvents();
 
 	/**
-	 * @brief Gets the display of the screen, done like this as using GLES / EGL seems to have many different ways of doing it. A bit annoying.
-	 * 
-	 */
-	void FetchDisplayMode();
-
-	/**
-	 * @brief Gets the ball rolling by finding the initialsizeing the display.
-	 */
-	void InitialiseDisplay();
-
-	/**
-	 * @brief Looks for the best configuration format for the display.
-	 * Throws an exception if one could not be found.
-	 */
-	void FindGLESConfiguration();
-
-	/**
-	 * @brief Create the rendering context
-	 */
-	void CreateRenderingContext();
-
-	/**
 	 * @brief Sets some common rendering states for a nice starting point.
 	 */
 	void SetRenderingDefaults();

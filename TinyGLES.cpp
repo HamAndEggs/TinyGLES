@@ -49,9 +49,6 @@
 	/**
 	 * @brief Emulate GLES with GL and X11, some defines to make the implementation cleaner, this is for development, I hate it adds loads of #ifdef's this should stop that.
 	 */
-	#define eglDestroyContext(DISPLAY__, CONTEXT__)
-	#define eglDestroySurface(DISPLAY__, SURFACE__)
-	#define eglTerminate(DISPLAY__)
 	#define eglSwapInterval(DISPLAY__,INTERVAL__)
 	#define glColorMask(RED__,GREEN__,BLUE__,ALPHA__)
 #endif
@@ -562,30 +559,13 @@ struct GLShader
 #ifdef PLATFORM_EGL
 struct PlatformInterface
 {
-	PlatformInterface()
-	{
-		int File = open("/dev/fb0", O_RDWR);
-		if(ioctl(File, FBIOGET_VSCREENINFO, &mScreenInfo) ) 
-		{
-			THROW_MEANINGFUL_EXCEPTION("Failed to open ioctl on /dev/fb0. Can not fetch screen mode!");
-		}
-		close(File);
+	PlatformInterface();
+	~PlatformInterface();
 
-		mWidth = mScreenInfo.xres;
-		mHeight = mScreenInfo.yres;
+	void SwapBuffers();
+	void InitialiseDisplay();
 
-		if( mWidth < 16 || mHeight < 16 )
-		{
-			THROW_MEANINGFUL_EXCEPTION("failed to find sensible screen mode from /dev/fb0");
-		}
-	}
-
-	void SwapBuffers()
-	{
-		assert(mDisplay);
-		assert(mSurface);
-		eglSwapBuffers(mDisplay,mSurface);
-	}
+	void FindGLESConfiguration();
 
 	int GetWidth()const{return mScreenInfo.xres;}
 	int GetHeight()const{return mScreenInfo.yres;}
@@ -633,6 +613,9 @@ struct PlatformInterface
 	int GetWidth()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->hdisplay;}return 0;}
 	int GetHeight()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->vdisplay;}return 0;}
 
+
+	void InitialiseDisplay();
+
 	void UpdateCurrentBuffer();
 	void SwapBuffers();
 };
@@ -666,7 +649,7 @@ struct PlatformInterface
 	/**
 	 * @brief Creates the X11 window and all the bits needed to get rendering with.
 	 */
-	void Create();
+	void InitialiseDisplay();
 
 	/**
 	 * @brief Processes the X11 events then exits when all are done. Returns true if the app is asked to quit.
@@ -712,10 +695,12 @@ GLES::GLES() :
 	}
 #endif
 
-	FetchDisplayMode();
-	InitialiseDisplay();
-	FindGLESConfiguration();
-	CreateRenderingContext();
+	mWidth = mPlatform->GetWidth();
+	mHeight = mPlatform->GetHeight();
+	VERBOSE_MESSAGE("Display resolution is " << mWidth << "x" << mHeight );
+
+	mPlatform->InitialiseDisplay();
+
 	SetRenderingDefaults();
 	BuildShaders();
 	BuildDebugTexture();
@@ -774,13 +759,6 @@ GLES::~GLES()
 		glDeleteTextures(1,&t.first);
 		CHECK_OGL_ERRORS();
 	}
-
-	VERBOSE_MESSAGE("Clearing display");
-
-	VERBOSE_MESSAGE("Destroying contect");
-	eglDestroyContext(mPlatform->mDisplay, mPlatform->mContext);
-    eglDestroySurface(mPlatform->mDisplay, mPlatform->mSurface);
-    eglTerminate(mPlatform->mDisplay);
 
 	VERBOSE_MESSAGE("All done");
 }
@@ -1931,166 +1909,6 @@ void GLES::ProcessSystemEvents()
 	}
 }
 
-void GLES::FetchDisplayMode()
-{
-	mWidth = mPlatform->GetWidth();
-	mHeight = mPlatform->GetHeight();
-	VERBOSE_MESSAGE("Display resolution is " << mWidth << "x" << mHeight );
-}
-
-void GLES::InitialiseDisplay()
-{
-#ifdef BROADCOM_NATIVE_WINDOW
-	bcm_host_init();
-#endif
-
-#ifdef PLATFORM_GLES
-	VERBOSE_MESSAGE("Calling eglGetDisplay");
-
-#ifdef PLATFORM_DIRECT_RENDER_MANAGER
-	mPlatform->mBufferManager = gbm_create_device(mPlatform->mDRMFile);
-	mPlatform->mDisplay = eglGetDisplay(mPlatform->mBufferManager);
-#else
-	mPlatform->mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-#endif
-
-
-	if( !mPlatform->mDisplay )
-	{
-		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
-	}
-
-	//Now we have a display lets initialize it.
-    EGLint majorVersion,minorVersion;
-	if( !eglInitialize(mPlatform->mDisplay, &majorVersion, &minorVersion) )
-	{
-		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
-	}
-	CHECK_OGL_ERRORS();
-	VERBOSE_MESSAGE("GLES version " << majorVersion << "." << minorVersion);
-	eglBindAPI(EGL_OPENGL_ES_API);
-	CHECK_OGL_ERRORS();
-#endif //#ifdef PLATFORM_GLES
-
-#ifdef PLATFORM_X11_GL
-	mPlatform->Create();
-#endif
-}
-
-void GLES::FindGLESConfiguration()
-{
-#ifdef PLATFORM_GLES
-	int depths_32_to_16[3] = {32,24,16};
-
-	for( int c = 0 ; c < 3 ; c++ )
-	{
-		const EGLint attrib_list[] =
-		{
-			EGL_RED_SIZE,			8,
-			EGL_GREEN_SIZE,			8,
-			EGL_BLUE_SIZE,			8,
-			EGL_ALPHA_SIZE,			8,
-			EGL_DEPTH_SIZE,			depths_32_to_16[c],
-			EGL_STENCIL_SIZE,		EGL_DONT_CARE,
-			EGL_RENDERABLE_TYPE,	EGL_OPENGL_ES2_BIT,
-			EGL_NONE,				EGL_NONE
-		};
-
-		EGLint numConfigs;
-		if( !eglChooseConfig(mPlatform->mDisplay,attrib_list,&mPlatform->mConfig,1, &numConfigs) )
-		{
-			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
-		}
-
-		if( numConfigs > 0 )
-		{
-			EGLint bufSize,r,g,b,a,z,s = 0;
-
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_BUFFER_SIZE,&bufSize);
-
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_RED_SIZE,&r);
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_GREEN_SIZE,&g);
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_BLUE_SIZE,&b);
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_ALPHA_SIZE,&a);
-
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_DEPTH_SIZE,&z);
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_STENCIL_SIZE,&s);
-
-			CHECK_OGL_ERRORS();
-
-			VERBOSE_MESSAGE("Config found:");
-			VERBOSE_MESSAGE("\tFrame buffer size " << bufSize);
-			VERBOSE_MESSAGE("\tRGBA " << r << "," << g << "," << b << "," << a);
-			VERBOSE_MESSAGE("\tZBuffer " << z+s << "Z " << z << "S " << s);
-
-			return;// All good :)
-		}
-	}
-	THROW_MEANINGFUL_EXCEPTION("No matching EGL configs found");
-#endif //#ifdef PLATFORM_GLES
-}
-
-void GLES::CreateRenderingContext()
-{
-#ifdef PLATFORM_GLES
-	//We have our display and have chosen the config so now we are ready to create the rendering context.
-	VERBOSE_MESSAGE("Creating context");
-	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
-	mPlatform->mContext = eglCreateContext(mPlatform->mDisplay,mPlatform->mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
-	if( !mPlatform->mContext )
-	{
-		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
-	}
-
-// This is annoying but GLES is just broken on RPi and always has been.
-#ifdef BROADCOM_NATIVE_WINDOW
-	VC_RECT_T dst_rect;
-	VC_RECT_T src_rect;
-
-	dst_rect.x = 0;
-	dst_rect.y = 0;
-	dst_rect.width = mWidth;
-	dst_rect.height = mHeight;
-
-	src_rect.x = 0;
-	src_rect.y = 0;
-	src_rect.width = mWidth << 16;
-	src_rect.height = mHeight << 16;        
-
-	DISPMANX_DISPLAY_HANDLE_T dispman_display = vc_dispmanx_display_open( 0 /* LCD */);
-	DISPMANX_UPDATE_HANDLE_T dispman_update = vc_dispmanx_update_start( 0 );
-
-	DISPMANX_ELEMENT_HANDLE_T dispman_element = vc_dispmanx_element_add(
-			dispman_update,
-			dispman_display,
-			0,&dst_rect,
-			0,&src_rect,
-			DISPMANX_PROTECTION_NONE,
-			nullptr,nullptr,
-			DISPMANX_NO_ROTATE);
-
-	mPlatform->mNativeWindow.element = dispman_element;
-	mPlatform->mNativeWindow.width = mWidth;
-	mPlatform->mNativeWindow.height = mHeight;
-	vc_dispmanx_update_submit_sync( dispman_update );
-	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,&mPlatform->mNativeWindow,0);
-#else
-	#ifdef PLATFORM_DIRECT_RENDER_MANAGER
-		mPlatform->mNativeWindow = gbm_surface_create(mPlatform->mBufferManager,mWidth, mHeight,mPlatform->mFOURCC_Format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-	#endif
-
-	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,mPlatform->mNativeWindow,0);
-#endif //BROADCOM_NATIVE_WINDOW
-
-
-	CHECK_OGL_ERRORS();
-	eglMakeCurrent(mPlatform->mDisplay, mPlatform->mSurface, mPlatform->mSurface, mPlatform->mContext );
-	eglQuerySurface(mPlatform->mDisplay, mPlatform->mSurface,EGL_WIDTH,  &mWidth);
-	eglQuerySurface(mPlatform->mDisplay, mPlatform->mSurface,EGL_HEIGHT, &mHeight);
-	CHECK_OGL_ERRORS();
-#endif //#ifdef PLATFORM_GLES
-}
-
 void GLES::SetRenderingDefaults()
 {
 	eglSwapInterval(mPlatform->mDisplay,1);
@@ -3026,6 +2844,173 @@ void FreeTypeFont::BuildTexture(
 
 #endif //#ifdef USE_FREETYPEFONTS
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// EGL layer implementation
+#ifdef PLATFORM_EGL
+PlatformInterface::PlatformInterface()
+{
+	int File = open("/dev/fb0", O_RDWR);
+	if(ioctl(File, FBIOGET_VSCREENINFO, &mScreenInfo) ) 
+	{
+		THROW_MEANINGFUL_EXCEPTION("Failed to open ioctl on /dev/fb0. Can not fetch screen mode!");
+	}
+	close(File);
+
+	mWidth = mScreenInfo.xres;
+	mHeight = mScreenInfo.yres;
+
+	if( mWidth < 16 || mHeight < 16 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("failed to find sensible screen mode from /dev/fb0");
+	}
+}
+
+PlatformInterface::~PlatformInterface()
+{
+	VERBOSE_MESSAGE("Destroying context");
+	eglDestroyContext(mPlatform->mDisplay, mPlatform->mContext);
+    eglDestroySurface(mPlatform->mDisplay, mPlatform->mSurface);
+    eglTerminate(mPlatform->mDisplay);
+}
+
+void PlatformInterface::SwapBuffers()
+{
+	assert(mDisplay);
+	assert(mSurface);
+	eglSwapBuffers(mDisplay,mSurface);
+}
+
+void PlatformInterface::InitialiseDisplay()
+{
+#ifdef BROADCOM_NATIVE_WINDOW
+	bcm_host_init();
+#endif
+
+	VERBOSE_MESSAGE("Calling eglGetDisplay");
+	mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+	if( !mDisplay )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
+	}
+
+	//Now we have a display lets initialize it.
+	EGLint majorVersion,minorVersion;
+	if( !eglInitialize(mDisplay, &majorVersion, &minorVersion) )
+	{
+		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
+	}
+	CHECK_OGL_ERRORS();
+	VERBOSE_MESSAGE("GLES version " << majorVersion << "." << minorVersion);
+	eglBindAPI(EGL_OPENGL_ES_API);
+	CHECK_OGL_ERRORS();
+
+	FindGLESConfiguration();
+
+	//We have our display and have chosen the config so now we are ready to create the rendering context.
+	VERBOSE_MESSAGE("Creating context");
+	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+	mContext = eglCreateContext(mDisplay,mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
+	if( !mContext )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
+	}
+
+// This is annoying but GLES is just broken on RPi 3,2,1 and always has been and always will be. RPi4 is now DRM.
+#ifdef BROADCOM_NATIVE_WINDOW
+	VC_RECT_T dst_rect;
+	VC_RECT_T src_rect;
+
+	dst_rect.x = 0;
+	dst_rect.y = 0;
+	dst_rect.width = mWidth;
+	dst_rect.height = mHeight;
+
+	src_rect.x = 0;
+	src_rect.y = 0;
+	src_rect.width = mWidth << 16;
+	src_rect.height = mHeight << 16;        
+
+	DISPMANX_DISPLAY_HANDLE_T dispman_display = vc_dispmanx_display_open( 0 /* LCD */);
+	DISPMANX_UPDATE_HANDLE_T dispman_update = vc_dispmanx_update_start( 0 );
+
+	DISPMANX_ELEMENT_HANDLE_T dispman_element = vc_dispmanx_element_add(
+			dispman_update,
+			dispman_display,
+			0,&dst_rect,
+			0,&src_rect,
+			DISPMANX_PROTECTION_NONE,
+			nullptr,nullptr,
+			DISPMANX_NO_ROTATE);
+
+	mNativeWindow.element = dispman_element;
+	mNativeWindow.width = mWidth;
+	mNativeWindow.height = mHeight;
+	vc_dispmanx_update_submit_sync( dispman_update );
+	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
+#else
+	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
+#endif //BROADCOM_NATIVE_WINDOW
+
+	CHECK_OGL_ERRORS();
+	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
+	eglQuerySurface(mDisplay, mSurface,EGL_WIDTH,  &mWidth);
+	eglQuerySurface(mDisplay, mSurface,EGL_HEIGHT, &mHeight);
+	CHECK_OGL_ERRORS();
+}
+
+void PlatformInterface::FindGLESConfiguration()
+{
+	int depths_32_to_16[3] = {32,24,16};
+
+	for( int c = 0 ; c < 3 ; c++ )
+	{
+		const EGLint attrib_list[] =
+		{
+			EGL_RED_SIZE,			8,
+			EGL_GREEN_SIZE,			8,
+			EGL_BLUE_SIZE,			8,
+			EGL_ALPHA_SIZE,			8,
+			EGL_DEPTH_SIZE,			depths_32_to_16[c],
+			EGL_STENCIL_SIZE,		EGL_DONT_CARE,
+			EGL_RENDERABLE_TYPE,	EGL_OPENGL_ES2_BIT,
+			EGL_NONE,				EGL_NONE
+		};
+
+		EGLint numConfigs;
+		if( !eglChooseConfig(mDisplay,attrib_list,&mConfig,1, &numConfigs) )
+		{
+			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
+		}
+
+		if( numConfigs > 0 )
+		{
+			EGLint bufSize,r,g,b,a,z,s = 0;
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_BUFFER_SIZE,&bufSize);
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_RED_SIZE,&r);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_GREEN_SIZE,&g);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_BLUE_SIZE,&b);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_ALPHA_SIZE,&a);
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_DEPTH_SIZE,&z);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_STENCIL_SIZE,&s);
+
+			CHECK_OGL_ERRORS();
+
+			VERBOSE_MESSAGE("Config found:");
+			VERBOSE_MESSAGE("\tFrame buffer size " << bufSize);
+			VERBOSE_MESSAGE("\tRGBA " << r << "," << g << "," << b << "," << a);
+			VERBOSE_MESSAGE("\tZBuffer " << z+s << "Z " << z << "S " << s);
+
+			return;// All good :)
+		}
+	}
+	THROW_MEANINGFUL_EXCEPTION("No matching EGL configs found");
+}
+#endif
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Direct Render Manager layer implementation
 // DRM Direct Render Manager hidden definition.
@@ -3118,12 +3103,57 @@ PlatformInterface::PlatformInterface()
 
 PlatformInterface::~PlatformInterface()
 {
+	VERBOSE_MESSAGE("Destroying context");
+	eglDestroyContext(mPlatform->mDisplay, mPlatform->mContext);
+    eglDestroySurface(mPlatform->mDisplay, mPlatform->mSurface);
+    eglTerminate(mPlatform->mDisplay);
+
 	VERBOSE_MESSAGE("Cleaning up DRM");
 	gbm_surface_destroy(mNativeWindow);
 	gbm_device_destroy(mBufferManager);
 	drmModeFreeEncoder(mModeEncoder);
 	drmModeFreeConnector(mConnector);
 	close(mDRMFile);
+}
+
+void PlatformInterface::InitialiseDisplay()
+{
+	VERBOSE_MESSAGE("Calling DRM InitialiseDisplay");
+
+	mBufferManager = gbm_create_device(mDRMFile);
+	mDisplay = eglGetDisplay(mBufferManager);
+	if( !mDisplay )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
+	}
+
+	//Now we have a display lets initialize it.
+	EGLint majorVersion,minorVersion;
+	if( !eglInitialize(mDisplay, &majorVersion, &minorVersion) )
+	{
+		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
+	}
+	CHECK_OGL_ERRORS();
+	VERBOSE_MESSAGE("GLES version " << majorVersion << "." << minorVersion);
+	eglBindAPI(EGL_OPENGL_ES_API);
+	CHECK_OGL_ERRORS();
+
+	//We have our display and have chosen the config so now we are ready to create the rendering context.
+	VERBOSE_MESSAGE("Creating context");
+	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+	mContext = eglCreateContext(mDisplay,mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
+	if( !mContext )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
+	}
+
+	mNativeWindow = gbm_surface_create(mBufferManager,mWidth, mHeight,mFOURCC_Format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
+	CHECK_OGL_ERRORS();
+
+	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
+	CHECK_OGL_ERRORS();
+
 }
 
 static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
@@ -3176,7 +3206,6 @@ void PlatformInterface::SwapBuffers()
 		assert(mConnector);
 		assert(mModeInfo);
 
-		std::clog << mModeEncoder->crtc_id << " " << mCurrentFrontBufferID << " " << mConnector->connector_id << "\n";
 		int ret = drmModeSetCrtc(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID, 0, 0,&mConnector->connector_id, 1, mModeInfo);
 		if (ret)
 		{
@@ -3225,7 +3254,7 @@ PlatformInterface::~PlatformInterface()
 	mXDisplay = nullptr;
 }
 
-void PlatformInterface::Create()
+void PlatformInterface::InitialiseDisplay()
 {
 	VERBOSE_MESSAGE("Making X11 window for GLES emulation");
 
