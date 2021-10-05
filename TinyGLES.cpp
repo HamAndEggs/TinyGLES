@@ -45,12 +45,6 @@
 	#include <GL/glext.h>
 	#include <GL/glx.h>
 	#include <GL/glu.h>
-	
-	/**
-	 * @brief Emulate GLES with GL and X11, some defines to make the implementation cleaner, this is for development, I hate it adds loads of #ifdef's this should stop that.
-	 */
-	#define eglSwapInterval(DISPLAY__,INTERVAL__)
-	#define glColorMask(RED__,GREEN__,BLUE__,ALPHA__)
 #endif
 
 // This is for RPi 3,2 and 1 (including zero)
@@ -65,6 +59,7 @@
 	#include <xf86drmMode.h>
 	#include <gbm.h>
 	#include <drm_fourcc.h>
+	#include "EGL/egl.h"
 
 	#define EGL_NO_X11
 	#define MESA_EGL_NO_X11_HEADERS
@@ -73,8 +68,12 @@
 
 #ifdef PLATFORM_GLES
 	#include "GLES2/gl2.h"
+#endif
+
+#ifdef PLATFORM_EGL
 	#include "EGL/egl.h"
 #endif
+
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1911,9 +1910,6 @@ void GLES::ProcessSystemEvents()
 
 void GLES::SetRenderingDefaults()
 {
-	eglSwapInterval(mPlatform->mDisplay,1);
-	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
-
 	glViewport(0, 0, (GLsizei)mWidth, (GLsizei)mHeight);
 	glDepthRangef(0.0f,1.0f);
 	glPixelStorei(GL_UNPACK_ALIGNMENT,1);
@@ -2950,6 +2946,9 @@ void PlatformInterface::InitialiseDisplay()
 	eglQuerySurface(mDisplay, mSurface,EGL_WIDTH,  &mWidth);
 	eglQuerySurface(mDisplay, mSurface,EGL_HEIGHT, &mHeight);
 	CHECK_OGL_ERRORS();
+
+	eglSwapInterval(mPlatform->mDisplay,1);
+	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
 }
 
 void PlatformInterface::FindEGLConfiguration()
@@ -3148,26 +3147,6 @@ void PlatformInterface::InitialiseDisplay()
 
 	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
 	CHECK_OGL_ERRORS();
-/*
-	VERBOSE_MESSAGE("First dummy frame");
-	eglSwapBuffers(mDisplay,mSurface);
-	CHECK_OGL_ERRORS();
-	UpdateCurrentBuffer();
-
-	if( mIsFirstFrame )
-	{
-		mIsFirstFrame = false;
-		assert(mModeEncoder);
-		assert(mConnector);
-		assert(mModeInfo);
-
-		int ret = drmModeSetCrtc(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID, 0, 0,&mConnector->connector_id, 1, mModeInfo);
-		if (ret)
-		{
-			THROW_MEANINGFUL_EXCEPTION("drmModeSetCrtc failed to set mode" + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
-		}
-	}*/
-
 }
 
 void PlatformInterface::FindEGLConfiguration()
