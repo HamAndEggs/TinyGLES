@@ -3147,7 +3147,7 @@ void PlatformInterface::InitialiseDisplay()
 		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
 	}
 
-	mNativeWindow = gbm_surface_create(mBufferManager,mWidth, mHeight,mFOURCC_Format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+	mNativeWindow = gbm_surface_create(mBufferManager,GetWidth(), GetHeight(),mFOURCC_Format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
 	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
 	CHECK_OGL_ERRORS();
 
