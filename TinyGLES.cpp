@@ -565,7 +565,7 @@ struct PlatformInterface
 	void SwapBuffers();
 	void InitialiseDisplay();
 
-	void FindGLESConfiguration();
+	void FindEGLConfiguration();
 
 	int GetWidth()const{return mScreenInfo.xres;}
 	int GetHeight()const{return mScreenInfo.yres;}
@@ -597,7 +597,7 @@ struct PlatformInterface
 	drmModeModeInfo* mModeInfo = nullptr;
 	struct gbm_device *mBufferManager = nullptr;
 	struct gbm_bo *mCurrentFrontBufferObject = nullptr;
-	uint32_t mFOURCC_Format = DRM_FORMAT_XRGB8888;// Hard coded for now. But I should be able to ask what to use. But DRM don't seem to have that...
+	uint32_t mFOURCC_Format = DRM_FORMAT_INVALID;
 	uint32_t mCurrentFrontBufferID = 0;
 
 	EGLDisplay mDisplay = nullptr;				//!<GL display
@@ -615,6 +615,7 @@ struct PlatformInterface
 
 
 	void InitialiseDisplay();
+	void FindEGLConfiguration();
 
 	void UpdateCurrentBuffer();
 	void SwapBuffers();
@@ -2897,7 +2898,7 @@ void PlatformInterface::InitialiseDisplay()
 	eglBindAPI(EGL_OPENGL_ES_API);
 	CHECK_OGL_ERRORS();
 
-	FindGLESConfiguration();
+	FindEGLConfiguration();
 
 	//We have our display and have chosen the config so now we are ready to create the rendering context.
 	VERBOSE_MESSAGE("Creating context");
@@ -2951,7 +2952,7 @@ void PlatformInterface::InitialiseDisplay()
 	CHECK_OGL_ERRORS();
 }
 
-void PlatformInterface::FindGLESConfiguration()
+void PlatformInterface::FindEGLConfiguration()
 {
 	int depths_32_to_16[3] = {32,24,16};
 
@@ -3130,6 +3131,8 @@ void PlatformInterface::InitialiseDisplay()
 	eglBindAPI(EGL_OPENGL_ES_API);
 	CHECK_OGL_ERRORS();
 
+	FindEGLConfiguration();
+
 	//We have our display and have chosen the config so now we are ready to create the rendering context.
 	VERBOSE_MESSAGE("Creating context");
 	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
@@ -3145,7 +3148,10 @@ void PlatformInterface::InitialiseDisplay()
 
 	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
 	CHECK_OGL_ERRORS();
-
+/*
+	VERBOSE_MESSAGE("First dummy frame");
+	eglSwapBuffers(mDisplay,mSurface);
+	CHECK_OGL_ERRORS();
 	UpdateCurrentBuffer();
 
 	if( mIsFirstFrame )
@@ -3160,8 +3166,76 @@ void PlatformInterface::InitialiseDisplay()
 		{
 			THROW_MEANINGFUL_EXCEPTION("drmModeSetCrtc failed to set mode" + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
 		}
-	}
+	}*/
 
+}
+
+void PlatformInterface::FindEGLConfiguration()
+{
+	int depths_32_to_16[3] = {32,24,16};
+
+	for( int c = 0 ; c < 3 ; c++ )
+	{
+		const EGLint attrib_list[] =
+		{
+			EGL_RED_SIZE,			8,
+			EGL_GREEN_SIZE,			8,
+			EGL_BLUE_SIZE,			8,
+			EGL_ALPHA_SIZE,			8,
+			EGL_DEPTH_SIZE,			depths_32_to_16[c],
+			EGL_STENCIL_SIZE,		EGL_DONT_CARE,
+			EGL_RENDERABLE_TYPE,	EGL_OPENGL_ES2_BIT,
+			EGL_NONE,				EGL_NONE
+		};
+
+		EGLint numConfigs;
+		if( !eglChooseConfig(mDisplay,attrib_list,&mConfig,1, &numConfigs) )
+		{
+			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
+		}
+
+		if( numConfigs > 0 )
+		{
+			EGLint bufSize,r,g,b,a,z,s = 0;
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_BUFFER_SIZE,&bufSize);
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_RED_SIZE,&r);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_GREEN_SIZE,&g);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_BLUE_SIZE,&b);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_ALPHA_SIZE,&a);
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_DEPTH_SIZE,&z);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_STENCIL_SIZE,&s);
+
+			CHECK_OGL_ERRORS();
+
+			// Get the format we need DRM buffers to match.
+			if( r == 8 && g == 8 && b == 8 )
+			{
+				if( a == 8 )
+				{
+					mFOURCC_Format = DRM_FORMAT_ARGB8888;
+				}
+				else
+				{
+					mFOURCC_Format = DRM_FORMAT_RGB888;
+				}
+			}
+			else
+			{
+				mFOURCC_Format = DRM_FORMAT_RGB565;
+			}
+
+			VERBOSE_MESSAGE("Config found:");
+			VERBOSE_MESSAGE("\tFrame buffer size " << bufSize);
+			VERBOSE_MESSAGE("\tRGBA " << r << "," << g << "," << b << "," << a);
+			VERBOSE_MESSAGE("\tZBuffer " << z+s << "Z " << z << "S " << s);
+
+			return;// All good :)
+		}
+	}
+	THROW_MEANINGFUL_EXCEPTION("No matching EGL configs found");
 }
 
 static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
