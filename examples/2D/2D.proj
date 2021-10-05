@@ -81,7 +81,9 @@
             ],
             "define": [
                 "DEBUG_BUILD",
-                "PLATFORM_X11_GL"
+                "PLATFORM_X11_GL",
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD"
             ]
         }
     },
