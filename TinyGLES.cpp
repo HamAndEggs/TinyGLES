@@ -707,7 +707,6 @@ GLES::GLES() :
 	BuildPixelFontTexture();
 	InitFreeTypeFont();
 	AllocateQuadBuffers();
-	PrepareFirstFrame();
 
 	VERBOSE_MESSAGE("GLES Ready");
 }
@@ -2265,13 +2264,6 @@ void GLES::AllocateQuadBuffers()
 	glBindBuffer(GL_ARRAY_BUFFER,0);
 
 	CHECK_OGL_ERRORS();
-}
-
-void GLES::PrepareFirstFrame()
-{
-	VERBOSE_MESSAGE("Preparing first frame");
-	Clear(0,0,0);
-	mPlatform->SwapBuffers();
 }
 
 void GLES::VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer)
