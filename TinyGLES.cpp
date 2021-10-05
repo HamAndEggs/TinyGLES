@@ -2869,9 +2869,9 @@ PlatformInterface::PlatformInterface()
 PlatformInterface::~PlatformInterface()
 {
 	VERBOSE_MESSAGE("Destroying context");
-	eglDestroyContext(mPlatform->mDisplay, mPlatform->mContext);
-    eglDestroySurface(mPlatform->mDisplay, mPlatform->mSurface);
-    eglTerminate(mPlatform->mDisplay);
+	eglDestroyContext(mDisplay, mContext);
+    eglDestroySurface(mDisplay, mSurface);
+    eglTerminate(mDisplay);
 }
 
 void PlatformInterface::SwapBuffers()
@@ -3104,9 +3104,9 @@ PlatformInterface::PlatformInterface()
 PlatformInterface::~PlatformInterface()
 {
 	VERBOSE_MESSAGE("Destroying context");
-	eglDestroyContext(mPlatform->mDisplay, mPlatform->mContext);
-    eglDestroySurface(mPlatform->mDisplay, mPlatform->mSurface);
-    eglTerminate(mPlatform->mDisplay);
+	eglDestroyContext(mDisplay, mContext);
+    eglDestroySurface(mDisplay, mSurface);
+    eglTerminate(mDisplay);
 
 	VERBOSE_MESSAGE("Cleaning up DRM");
 	gbm_surface_destroy(mNativeWindow);
