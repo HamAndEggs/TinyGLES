@@ -3064,13 +3064,13 @@ void PlatformInterface::InitialiseDisplay()
 
 	dst_rect.x = 0;
 	dst_rect.y = 0;
-	dst_rect.width = mWidth;
-	dst_rect.height = mHeight;
+	dst_rect.width = mPlatform->GetWidth();
+	dst_rect.height = mPlatform->GetHeight();
 
 	src_rect.x = 0;
 	src_rect.y = 0;
-	src_rect.width = mWidth << 16;
-	src_rect.height = mHeight << 16;        
+	src_rect.width = dst_rect.width << 16;
+	src_rect.height = dst_rect.height << 16;        
 
 	DISPMANX_DISPLAY_HANDLE_T dispman_display = vc_dispmanx_display_open( 0 /* LCD */);
 	DISPMANX_UPDATE_HANDLE_T dispman_update = vc_dispmanx_update_start( 0 );
@@ -3085,18 +3085,16 @@ void PlatformInterface::InitialiseDisplay()
 			DISPMANX_NO_ROTATE);
 
 	mNativeWindow.element = dispman_element;
-	mNativeWindow.width = mWidth;
-	mNativeWindow.height = mHeight;
+	mNativeWindow.width = mPlatform->GetWidth();
+	mNativeWindow.height =  mPlatform->GetHeight();
 	vc_dispmanx_update_submit_sync( dispman_update );
 	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
 #else
 	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
 #endif //BROADCOM_NATIVE_WINDOW
-
 	CHECK_OGL_ERRORS();
+
 	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
-	eglQuerySurface(mDisplay, mSurface,EGL_WIDTH,  &mWidth);
-	eglQuerySurface(mDisplay, mSurface,EGL_HEIGHT, &mHeight);
 	CHECK_OGL_ERRORS();
 
 	eglSwapInterval(mPlatform->mDisplay,1);
