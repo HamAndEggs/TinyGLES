@@ -3064,8 +3064,8 @@ void PlatformInterface::InitialiseDisplay()
 
 	dst_rect.x = 0;
 	dst_rect.y = 0;
-	dst_rect.width = mPlatform->GetWidth();
-	dst_rect.height = mPlatform->GetHeight();
+	dst_rect.width = GetWidth();
+	dst_rect.height = GetHeight();
 
 	src_rect.x = 0;
 	src_rect.y = 0;
@@ -3085,8 +3085,8 @@ void PlatformInterface::InitialiseDisplay()
 			DISPMANX_NO_ROTATE);
 
 	mNativeWindow.element = dispman_element;
-	mNativeWindow.width = mPlatform->GetWidth();
-	mNativeWindow.height =  mPlatform->GetHeight();
+	mNativeWindow.width = GetWidth();
+	mNativeWindow.height =  GetHeight();
 	vc_dispmanx_update_submit_sync( dispman_update );
 	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
 #else
@@ -3097,7 +3097,7 @@ void PlatformInterface::InitialiseDisplay()
 	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
 	CHECK_OGL_ERRORS();
 
-	eglSwapInterval(mPlatform->mDisplay,1);
+	eglSwapInterval(mDisplay,1);
 	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
 }
 
