@@ -3001,10 +3001,7 @@ PlatformInterface::PlatformInterface()
 	}
 	close(File);
 
-	mWidth = mScreenInfo.xres;
-	mHeight = mScreenInfo.yres;
-
-	if( mWidth < 16 || mHeight < 16 )
+	if( mScreenInfo.xres < 16 || mScreenInfo.yres < 16 )
 	{
 		THROW_MEANINGFUL_EXCEPTION("failed to find sensible screen mode from /dev/fb0");
 	}
@@ -3045,7 +3042,7 @@ void PlatformInterface::InitialiseDisplay()
 		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
 	}
 	CHECK_OGL_ERRORS();
-	VERBOSE_MESSAGE("GLES version " << majorVersion << "." << minorVersion);
+	VERBOSE_MESSAGE("EGL version " << majorVersion << "." << minorVersion);
 	eglBindAPI(EGL_OPENGL_ES_API);
 	CHECK_OGL_ERRORS();
 
@@ -3281,7 +3278,7 @@ void PlatformInterface::InitialiseDisplay()
 		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
 	}
 	CHECK_OGL_ERRORS();
-	VERBOSE_MESSAGE("GLES version " << majorVersion << "." << minorVersion);
+	VERBOSE_MESSAGE("EGL version " << majorVersion << "." << minorVersion);
 	eglBindAPI(EGL_OPENGL_ES_API);
 	CHECK_OGL_ERRORS();
 
