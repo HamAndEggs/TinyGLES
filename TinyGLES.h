@@ -108,6 +108,20 @@ enum struct SystemEventType
 };
 
 /**
+ * @brief Flags to alter the way the GLES code creates it's environment.
+ * 
+ */
+enum CreateFlags
+{
+	ROTATE_FRAME_BUFFER_90		= (1<<0),		//!< Rotates clockwise.
+	ROTATE_FRAME_BUFFER_180		= (1<<1),		//!< Rotates clockwise.
+	ROTATE_FRAME_BUFFER_270		= (1<<2),		//!< Rotates clockwise.
+
+	ROTATE_FRAME_PORTRATE		= (1<<3),		//!< If the hardware reports a landscape mode (width > height)  will apply a 90 degree rotation
+	ROTATE_FRAME_LANDSCAPE		= (1<<4),		//!< If the hardware reports a portrate mode (width < height) will apply a 90 degree rotation
+};
+
+/**
  * @brief The data relating to a system event.
  * I've implemented some very basic events. Not going to over do it. Just passes on some common ones.
  * If you need to track the last know state of something then you'll have to do that. If I try it may not be how you expect it to work.
@@ -205,8 +219,10 @@ public:
 
 	/**
 	 * @brief Creates and opens a GLES object. Throws an exception if it fails.
+	 * 
+	 * @param pFlags 
 	 */
-	GLES();
+	GLES(uint32_t pFlags = 0);
 
 	/**
 	 * @brief Clean up code. You must delete your object on exit!
@@ -216,17 +232,17 @@ public:
 	/**
 		@brief Returns the width of the frame buffer.
 	*/
-	int GetWidth()const{return mWidth;}
+	int GetWidth()const{return mReported.Width;}
 
 	/**
 		@brief Returns the height of the frame buffer.
 	*/
-	int GetHeight()const{return mHeight;}
+	int GetHeight()const{return mReported.Height;}
 
 	/**
 	 * @brief Get the Display Aspect Ratio
 	 */
-	float GetDisplayAspectRatio()const{return (float)mWidth/(float)mHeight;}
+	float GetDisplayAspectRatio()const{return (float)GetWidth()/(float)GetHeight();}
 
 	/**
 	 * @brief Marks the start of the frame, normally called in the while of a loop to create the render loop.
@@ -529,10 +545,15 @@ private:
 	void ColourPtr(int pNum_coord,const uint8_t* pPointer);
 	void SetUserSpaceStreamPtr(uint32_t pStream,int pNum_coord, uint32_t pType,const void* pPointer);
 
+	uint32_t mCreateFlags;
 	bool mKeepGoing = true;								//!< Set to false by the application requesting to exit or the user doing ctrl + c.
 
-	int mWidth = 0;
-	int mHeight = 0;
+	// mPhysical is the atchal width / height of the display, we maybe applying a rotation. Well tell the app the size using mReported.
+	struct
+	{
+		int Width = 0;
+		int Height = 0;
+	}mPhysical,mReported;
 
 	std::unique_ptr<PlatformInterface> mPlatform;				//!< This is all the data needed to drive the rendering platform that this code sits on and used to render with.
 	std::unique_ptr<WorkBuffers> mWorkBuffers;					//!< Handy set of internal work buffers used when rendering so we don't blow the stack or thrash the heap. Easy speed up.

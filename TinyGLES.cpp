@@ -57,7 +57,7 @@
 //sudo apt install libdrm
 	#include <xf86drm.h>
 	#include <xf86drmMode.h>
-	#include <gbm.h>
+	#include <gbm.h>	// This is used to get the egl stuff going. DRM is used to do the page flip to the display. Goes.. DRM -> GDM -> GLES (I think)
 	#include <drm_fourcc.h>
 	#include "EGL/egl.h"
 
@@ -591,11 +591,14 @@ struct PlatformInterface
 {
 	bool mIsFirstFrame = true;
 	int mDRMFile = -1;
+
+	// This is used for the EGL bring up and getting GLES going along with DRM.
+	struct gbm_device *mBufferManager = nullptr;
+	struct gbm_bo *mCurrentFrontBufferObject = nullptr;
+
 	drmModeEncoder *mModeEncoder = nullptr;
 	drmModeConnector* mConnector = nullptr;
 	drmModeModeInfo* mModeInfo = nullptr;
-	struct gbm_device *mBufferManager = nullptr;
-	struct gbm_bo *mCurrentFrontBufferObject = nullptr;
 	uint32_t mFOURCC_Format = DRM_FORMAT_INVALID;
 	uint32_t mCurrentFrontBufferID = 0;
 
@@ -670,7 +673,8 @@ struct PlatformInterface
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // GLES Implementation
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-GLES::GLES() :
+GLES::GLES(uint32_t pFlags) :
+	mCreateFlags(pFlags),
 	mPlatform(std::make_unique<PlatformInterface>()),
 	mWorkBuffers(std::make_unique<WorkBuffers>())
 {
@@ -695,9 +699,39 @@ GLES::GLES() :
 	}
 #endif
 
-	mWidth = mPlatform->GetWidth();
-	mHeight = mPlatform->GetHeight();
-	VERBOSE_MESSAGE("Display resolution is " << mWidth << "x" << mHeight );
+	mPhysical.Width = mPlatform->GetWidth();
+	mPhysical.Height = mPlatform->GetHeight();
+
+	if( mCreateFlags&ROTATE_FRAME_PORTRATE )
+	{
+		mCreateFlags &= ~ROTATE_FRAME_PORTRATE;
+		if( mPhysical.Width > mPhysical.Height )
+		{
+			mCreateFlags |= ROTATE_FRAME_BUFFER_90;
+		}
+	}
+
+	if( mCreateFlags&ROTATE_FRAME_LANDSCAPE )
+	{
+		mCreateFlags &= ~ROTATE_FRAME_LANDSCAPE;
+		if( mPhysical.Width < mPhysical.Height )
+		{
+			mCreateFlags |= ROTATE_FRAME_BUFFER_90;
+		}
+	}
+
+	if( mCreateFlags&(ROTATE_FRAME_BUFFER_90|ROTATE_FRAME_BUFFER_270) )
+	{
+		mReported.Width = mPhysical.Height;
+		mReported.Height = mPhysical.Width;
+	}
+	else
+	{
+		mReported.Width = mPhysical.Width;
+		mReported.Height = mPhysical.Height;
+	}
+
+	VERBOSE_MESSAGE("Physical display resolution is " << mPhysical.Width << "x" << mPhysical.Height );
 
 	mPlatform->InitialiseDisplay();
 
@@ -794,30 +828,151 @@ void GLES::Clear(uint32_t pTexture)
 	CHECK_OGL_ERRORS();
 	FillRectangle(0,0,GetWidth(),GetHeight(),pTexture);
 }
+/*
+static const double PI = 3.141592654;
+static const double DEGTORAD = (PI / 180.0);
+
+static void MatrixSetRotationX(float m[4][4],float Angle)
+{
+	float sinZ = sin(Angle * DEGTORAD);
+	float cosZ = cos(Angle * DEGTORAD);
+
+	m[0][0] = cosZ;
+	m[0][1] = sinZ;
+	m[0][2] = 0.0f;
+	m[0][3] = 0.0f;
+
+	m[1][0] = -sinZ;
+	m[1][1] = cosZ;
+	m[1][2] = 0.0f;
+	m[1][3] = 0.0f;
+
+	m[2][0] = 0.0f;
+	m[2][1] = 0.0f;
+	m[2][2] = 1.0f;
+	m[2][3] = 0.0f;
+
+	m[3][0] = 1024.0f;
+	m[3][1] = 0.0f;
+	m[3][2] = 0.0f;
+	m[3][3] = 1.0f;
+}
+
+static void MatrixMul(float m[4][4],const float pA[4][4],const float pB[4][4])
+{
+
+	m[0][0] = (pA[0][0]*pB[0][0]) + (pA[0][1]*pB[1][0]) + (pA[0][2]*pB[2][0]) + (pA[0][3]*pB[3][0]);
+	m[0][1] = (pA[0][0]*pB[0][1]) + (pA[0][1]*pB[1][1]) + (pA[0][2]*pB[2][1]) + (pA[0][3]*pB[3][1]);
+	m[0][2] = (pA[0][0]*pB[0][2]) + (pA[0][1]*pB[1][2]) + (pA[0][2]*pB[2][2]) + (pA[0][3]*pB[3][2]);
+	m[0][3] = (pA[0][0]*pB[0][3]) + (pA[0][1]*pB[1][3]) + (pA[0][2]*pB[2][3]) + (pA[0][3]*pB[3][3]);
+
+	m[1][0] = (pA[1][0]*pB[0][0]) + (pA[1][1]*pB[1][0]) + (pA[1][2]*pB[2][0]) + (pA[1][3]*pB[3][0]);
+	m[1][1] = (pA[1][0]*pB[0][1]) + (pA[1][1]*pB[1][1]) + (pA[1][2]*pB[2][1]) + (pA[1][3]*pB[3][1]);
+	m[1][2] = (pA[1][0]*pB[0][2]) + (pA[1][1]*pB[1][2]) + (pA[1][2]*pB[2][2]) + (pA[1][3]*pB[3][2]);
+	m[1][3] = (pA[1][0]*pB[0][3]) + (pA[1][1]*pB[1][3]) + (pA[1][2]*pB[2][3]) + (pA[1][3]*pB[3][3]);
+
+	m[2][0] = (pA[2][0]*pB[0][0]) + (pA[2][1]*pB[1][0]) + (pA[2][2]*pB[2][0]) + (pA[2][3]*pB[3][0]);
+	m[2][1] = (pA[2][0]*pB[0][1]) + (pA[2][1]*pB[1][1]) + (pA[2][2]*pB[2][1]) + (pA[2][3]*pB[3][1]);
+	m[2][2] = (pA[2][0]*pB[0][2]) + (pA[2][1]*pB[1][2]) + (pA[2][2]*pB[2][2]) + (pA[2][3]*pB[3][2]);
+	m[2][3] = (pA[2][0]*pB[0][3]) + (pA[2][1]*pB[1][3]) + (pA[2][2]*pB[2][3]) + (pA[2][3]*pB[3][3]);
+
+	m[3][0] = (pA[3][0]*pB[0][0]) + (pA[3][1]*pB[1][0]) + (pA[3][2]*pB[2][0]) + (pA[3][3]*pB[3][0]);
+	m[3][1] = (pA[3][0]*pB[0][1]) + (pA[3][1]*pB[1][1]) + (pA[3][2]*pB[2][1]) + (pA[3][3]*pB[3][1]);
+	m[3][2] = (pA[3][0]*pB[0][2]) + (pA[3][1]*pB[1][2]) + (pA[3][2]*pB[2][2]) + (pA[3][3]*pB[3][2]);
+	m[3][3] = (pA[3][0]*pB[0][3]) + (pA[3][1]*pB[1][3]) + (pA[3][2]*pB[2][3]) + (pA[3][3]*pB[3][3]);
+}*/
 
 void GLES::SetFrustum2D()
 {
-	VERBOSE_MESSAGE("SetFrustum2D " << mWidth << " " << mHeight);
+	VERBOSE_MESSAGE("SetFrustum2D " << mPhysical.Width << " " << mPhysical.Height);
+/*
+	float projection[4][4],r[4][4];
 
-	mMatrices.projection[0][0] = 2.0f / (float)mWidth;
-	mMatrices.projection[0][1] = 0;
-	mMatrices.projection[0][2] = 0;
-	mMatrices.projection[0][3] = 0;
+	projection[0][0] = 2.0f / (float)mWidth;
+	projection[0][1] = 0;
+	projection[0][2] = 0;
+	projection[0][3] = 0;
 
-	mMatrices.projection[1][0] = 0;
-	mMatrices.projection[1][1] = -2.0f / (float)mHeight;
-	mMatrices.projection[1][2] = 0;
-	mMatrices.projection[1][3] = 0;
+	projection[1][0] = 0;
+	projection[1][1] = -2.0f / (float)mHeight;
+	projection[1][2] = 0;
+	projection[1][3] = 0;
 		  	
-	mMatrices.projection[2][0] = 0;
-	mMatrices.projection[2][1] = 0;
-	mMatrices.projection[2][2] = 0;
-	mMatrices.projection[2][3] = 0;
+	projection[2][0] = 0;
+	projection[2][1] = 0;
+	projection[2][2] = 0;
+	projection[2][3] = 0;
 		  	
-	mMatrices.projection[3][0] = -1;
-	mMatrices.projection[3][1] = 1;
-	mMatrices.projection[3][2] = 0;
-	mMatrices.projection[3][3] = 1;
+	projection[3][0] = -1;
+	projection[3][1] = 1;
+	projection[3][2] = 0;
+	projection[3][3] = 1;
+
+	MatrixSetRotationX(r,90.0f);
+
+	for( int a = 0 ; a < 4 ; a++ )
+	{
+		for( int b = 0 ; b < 4 ; b++ )
+		{
+			std::clog << projection[a][b] << "\n";
+		}
+	}
+	std::clog << "\n";
+	MatrixMul(mMatrices.projection,r,projection);
+
+	for( int a = 0 ; a < 4 ; a++ )
+	{
+		for( int b = 0 ; b < 4 ; b++ )
+		{
+			std::clog << mMatrices.projection[a][b] << "\n";
+		}
+	}
+*/
+
+	if( mCreateFlags&ROTATE_FRAME_BUFFER_90 )
+	{
+		mMatrices.projection[0][0] = 0;
+		mMatrices.projection[0][1] = -2.0f / (float)mPhysical.Height;
+		mMatrices.projection[0][2] = 0;
+		mMatrices.projection[0][3] = 0;
+
+		mMatrices.projection[1][0] = -2.0f / (float)mPhysical.Width;
+		mMatrices.projection[1][1] = 0;
+		mMatrices.projection[1][2] = 0;
+		mMatrices.projection[1][3] = 0;
+				
+		mMatrices.projection[2][0] = 0;
+		mMatrices.projection[2][1] = 0;
+		mMatrices.projection[2][2] = 0;
+		mMatrices.projection[2][3] = 0;
+				
+		mMatrices.projection[3][0] = 1;
+		mMatrices.projection[3][1] = 1;
+		mMatrices.projection[3][2] = 0;
+		mMatrices.projection[3][3] = 1;
+	}
+	else
+	{
+		mMatrices.projection[0][0] = 2.0f / (float)mPhysical.Width;
+		mMatrices.projection[0][1] = 0;
+		mMatrices.projection[0][2] = 0;
+		mMatrices.projection[0][3] = 0;
+
+		mMatrices.projection[1][0] = 0;
+		mMatrices.projection[1][1] = -2.0f / (float)mPhysical.Height;
+		mMatrices.projection[1][2] = 0;
+		mMatrices.projection[1][3] = 0;
+				
+		mMatrices.projection[2][0] = 0;
+		mMatrices.projection[2][1] = 0;
+		mMatrices.projection[2][2] = 0;
+		mMatrices.projection[2][3] = 0;
+				
+		mMatrices.projection[3][0] = -1;
+		mMatrices.projection[3][1] = 1;
+		mMatrices.projection[3][2] = 0;
+		mMatrices.projection[3][3] = 1;
+	}
 }
 
 void GLES::SetFrustum3D(float pFov, float pAspect, float pNear, float pFar)
@@ -1910,7 +2065,7 @@ void GLES::ProcessSystemEvents()
 
 void GLES::SetRenderingDefaults()
 {
-	glViewport(0, 0, (GLsizei)mWidth, (GLsizei)mHeight);
+	glViewport(0, 0, (GLsizei)mPhysical.Width, (GLsizei)mPhysical.Height);
 	glDepthRangef(0.0f,1.0f);
 	glPixelStorei(GL_UNPACK_ALIGNMENT,1);
 	SetFrustum2D();
