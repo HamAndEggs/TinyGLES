@@ -109,7 +109,7 @@ int main(int argc, char *argv[])
     std::cout << "Build date " << APP_BUILD_DATE << '\n';
     std::cout << "Build time " << APP_BUILD_TIME << '\n';
 
-    tinygles::GLES GL;
+    tinygles::GLES GL(tinygles::ROTATE_FRAME_LANDSCAPE);
 
     bool usingBatch = true;
     GL.SetSystemEventHandler([&usingBatch](auto pEvent)
