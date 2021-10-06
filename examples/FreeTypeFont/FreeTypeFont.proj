@@ -65,8 +65,7 @@
                 "DEBUG_BUILD",
                 "PLATFORM_DIRECT_RENDER_MANAGER",
                 "PLATFORM_GLES",
-                "VERBOSE_BUILD",
-                "VERBOSE_SHADER_BUILD"
+                "VERBOSE_BUILD"
             ]
         },
         "X11-debug":
