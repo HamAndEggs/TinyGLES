@@ -45,26 +45,35 @@
 	#include <GL/glext.h>
 	#include <GL/glx.h>
 	#include <GL/glu.h>
-	
-	/**
-	 * @brief Emulate GLES with GL and X11, some defines to make the implementation cleaner, this is for development, I hate it adds loads of #ifdef's this should stop that.
-	 */
-	#define eglSwapBuffers(DISPLAY__,SURFACE__)			{mPlatform->RedrawWindow();}
-	#define eglDestroyContext(DISPLAY__, CONTEXT__)
-	#define eglDestroySurface(DISPLAY__, SURFACE__)
-	#define eglTerminate(DISPLAY__)
-	#define eglSwapInterval(DISPLAY__,INTERVAL__)
-	#define glColorMask(RED__,GREEN__,BLUE__,ALPHA__)
 #endif
 
+// This is for RPi 3,2 and 1 (including zero)
 #ifdef BROADCOM_NATIVE_WINDOW // All included from /opt/vc/include
 	#include "bcm_host.h"
 #endif
 
+// This is for linux systems that have no window manager. Like RPi4 running their light version of raspbian or a distro built with Yocto.
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+//sudo apt install libdrm
+	#include <xf86drm.h>
+	#include <xf86drmMode.h>
+	#include <gbm.h>	// This is used to get the egl stuff going. DRM is used to do the page flip to the display. Goes.. DRM -> GDM -> GLES (I think)
+	#include <drm_fourcc.h>
+	#include "EGL/egl.h"
+
+	#define EGL_NO_X11
+	#define MESA_EGL_NO_X11_HEADERS
+
+#endif
+
 #ifdef PLATFORM_GLES
 	#include "GLES2/gl2.h"
+#endif
+
+#ifdef PLATFORM_EGL
 	#include "EGL/egl.h"
 #endif
+
 
 namespace tinygles{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -83,7 +92,18 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 	#define CHECK_OGL_ERRORS()
 #endif
 
-#define VERBOSE_MESSAGE(THE_MESSAGE__)	{if(mVerbose){std::clog << THE_MESSAGE__ << "\n";}}
+#ifdef VERBOSE_BUILD
+	#define VERBOSE_MESSAGE(THE_MESSAGE__)	{std::clog << THE_MESSAGE__ << "\n";}
+#else
+	#define VERBOSE_MESSAGE(THE_MESSAGE__)
+#endif
+
+#ifdef VERBOSE_SHADER_BUILD
+	#define VERBOSE_SHADER_MESSAGE(THE_MESSAGE__)	{std::clog << "Shader: " << THE_MESSAGE__ << "\n";}
+#else
+	#define VERBOSE_SHADER_MESSAGE(THE_MESSAGE__)
+#endif
+
 
 #define THROW_MEANINGFUL_EXCEPTION(THE_MESSAGE__)	{throw std::runtime_error("At: " + std::to_string(__LINE__) + " In " + std::string(__FILE__) + " : " + std::string(THE_MESSAGE__));}
 
@@ -464,7 +484,7 @@ struct FreeTypeFont
 		}uv[2];
 	};
 
-	FreeTypeFont(FT_Face pFontFace,int pPixelHeight,bool pVerbose);
+	FreeTypeFont(FT_Face pFontFace,int pPixelHeight);
 	~FreeTypeFont();
 
 	/**
@@ -481,7 +501,6 @@ struct FreeTypeFont
 			std::function<void(uint32_t pTexture,int pX,int pY,int pWidth,int pHeight,const uint8_t* pPixels)> pFillTexture);
 
 	const std::string mFontName; //<! Helps with debugging.
-	const bool mVerbose;
 	FT_Face mFace;								//<! The font we are rending from.
 	uint32_t mTexture;							//<! This is the texture that the glyphs are in so we can render using GL and quads. It's crud but works. ;)
 	std::array<FreeTypeFont::Glyph,96>mGlyphs;	//<! Meta data needed to render the characters.
@@ -502,7 +521,7 @@ struct FreeTypeFont
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 struct GLShader
 {
-	GLShader(const std::string& pName,const char* pVertex, const char* pFragment,bool pVerbose);
+	GLShader(const std::string& pName,const char* pVertex, const char* pFragment);
 	~GLShader();
 
 	int GetUniformLocation(const char* pName);
@@ -517,7 +536,6 @@ struct GLShader
 	bool GetUsesTransform()const{return mUniforms.trans > -1;}
 
 	const std::string mName;	//!< Mainly to help debugging.
-	const bool mVerbose;
 	const bool mEnableStreamUV;
 	const bool mEnableStreamTrans;
 
@@ -536,21 +554,73 @@ struct GLShader
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// GLES 2.0 emulation hidden definition.
-#ifdef PLATFORM_GLES
+// EGL hidden definition.
+#ifdef PLATFORM_EGL
 struct PlatformInterface
 {
-	PlatformInterface(bool pVerbose){}
+	PlatformInterface();
+	~PlatformInterface();
+
+	void SwapBuffers();
+	void InitialiseDisplay();
+
+	void FindEGLConfiguration();
+
+	int GetWidth()const{return mScreenInfo.xres;}
+	int GetHeight()const{return mScreenInfo.yres;}
+
+	struct fb_var_screeninfo mScreenInfo;
+	EGLDisplay mDisplay = nullptr;				//!<GL display
+	EGLSurface mSurface = nullptr;				//!<GL rendering surface
+	EGLContext mContext = nullptr;				//!<GL rendering context
+	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
+
+#ifdef BROADCOM_NATIVE_WINDOW
+	EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
+#else
+	EGLNativeWindowType mNativeWindow = nullptr;
+#endif
+};
+#endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// DRM Direct Render Manager hidden definition.
+// Used for more model systems like RPi4 and proper GL / GLES implementations.
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+struct PlatformInterface
+{
+	bool mIsFirstFrame = true;
+	int mDRMFile = -1;
+
+	// This is used for the EGL bring up and getting GLES going along with DRM.
+	struct gbm_device *mBufferManager = nullptr;
+	struct gbm_bo *mCurrentFrontBufferObject = nullptr;
+
+	drmModeEncoder *mModeEncoder = nullptr;
+	drmModeConnector* mConnector = nullptr;
+	drmModeModeInfo* mModeInfo = nullptr;
+	uint32_t mFOURCC_Format = DRM_FORMAT_INVALID;
+	uint32_t mCurrentFrontBufferID = 0;
 
 	EGLDisplay mDisplay = nullptr;				//!<GL display
 	EGLSurface mSurface = nullptr;				//!<GL rendering surface
 	EGLContext mContext = nullptr;				//!<GL rendering context
 	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
-	#ifdef BROADCOM_NATIVE_WINDOW
-		EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
-	#else 
-		EGLNativeWindowType mNativeWindow;
-	#endif
+
+	struct gbm_surface *mNativeWindow = nullptr;
+
+	PlatformInterface();
+	~PlatformInterface();
+
+	int GetWidth()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->hdisplay;}return 0;}
+	int GetHeight()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->vdisplay;}return 0;}
+
+
+	void InitialiseDisplay();
+	void FindEGLConfiguration();
+
+	void UpdateCurrentBuffer();
+	void SwapBuffers();
 };
 #endif
 
@@ -567,7 +637,6 @@ struct PlatformInterface
  */
 struct PlatformInterface
 {
-	const bool mVerbose;
 	Display *mXDisplay = nullptr;
 	Window mWindow = 0;
 	Atom mDeleteMessage;
@@ -577,13 +646,13 @@ struct PlatformInterface
 
 	bool mWindowReady;
 
-	PlatformInterface(bool pVerbose);
+	PlatformInterface();
 	~PlatformInterface();
 
 	/**
 	 * @brief Creates the X11 window and all the bits needed to get rendering with.
 	 */
-	void Create();
+	void InitialiseDisplay();
 
 	/**
 	 * @brief Processes the X11 events then exits when all are done. Returns true if the app is asked to quit.
@@ -592,18 +661,21 @@ struct PlatformInterface
 
 	/**
 	 * @brief Draws the frame buffer to the X11 window.
-	 * 
 	 */
-	void RedrawWindow();
+	void SwapBuffers();
+
+	int GetWidth()const{return X11_EMULATION_WIDTH;}
+	int GetHeight()const{return X11_EMULATION_HEIGHT;}
+
 };
 #endif //#ifdef USE_X11_EMULATION
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // GLES Implementation
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-GLES::GLES(bool pVerbose) :
-	mVerbose(pVerbose),
-	mPlatform(std::make_unique<PlatformInterface>(pVerbose)),
+GLES::GLES(uint32_t pFlags) :
+	mCreateFlags(pFlags),
+	mPlatform(std::make_unique<PlatformInterface>()),
 	mWorkBuffers(std::make_unique<WorkBuffers>())
 {
 	// Lets hook ctrl + c.
@@ -611,36 +683,66 @@ GLES::GLES(bool pVerbose) :
 
 	const char* MouseDeviceName = "/dev/input/event0";
 	mPointer.mDevice = open(MouseDeviceName,O_RDONLY|O_NONBLOCK); // May fail, this is ok. They may not have one.
-	if( mVerbose )
+#ifdef VERBOSE_BUILD
+	if(  mPointer.mDevice >  0 )
 	{
-		if(  mPointer.mDevice >  0 )
+		VERBOSE_MESSAGE("Opened mouse device " << MouseDeviceName);
+		char name[256] = "Unknown";
+		if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
 		{
-			char name[256] = "Unknown";
-			if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
-			{
-				std::clog << "Reading mouse from: handle = " << mPointer.mDevice << " name = " << name << "\n";
-			}
-			else
-			{
-				std::clog << "Open mouse device" << MouseDeviceName << "\n" ;
-			}
+			VERBOSE_MESSAGE("Reading mouse from: handle = " << mPointer.mDevice << " name = " << name);
 		}
-		else
-		{// Not an error, may not have one connected. Depends on the usecase.
-			std::clog << "Failed to open mouse device " << MouseDeviceName << "\n";
+	}
+	else
+	{// Not an error, may not have one connected. Depends on the usecase.
+		VERBOSE_MESSAGE("Failed to open mouse device " << MouseDeviceName);
+	}
+#endif
+
+	mPhysical.Width = mPlatform->GetWidth();
+	mPhysical.Height = mPlatform->GetHeight();
+
+	if( mCreateFlags&ROTATE_FRAME_PORTRATE )
+	{
+		mCreateFlags &= ~ROTATE_FRAME_PORTRATE;
+		if( mPhysical.Width > mPhysical.Height )
+		{
+			mCreateFlags |= ROTATE_FRAME_BUFFER_90;
 		}
 	}
 
-	FetchDisplayMode();
-	InitialiseDisplay();
-	FindGLESConfiguration();
-	CreateRenderingContext();
+	if( mCreateFlags&ROTATE_FRAME_LANDSCAPE )
+	{
+		mCreateFlags &= ~ROTATE_FRAME_LANDSCAPE;
+		if( mPhysical.Width < mPhysical.Height )
+		{
+			mCreateFlags |= ROTATE_FRAME_BUFFER_90;
+		}
+	}
+
+	if( mCreateFlags&(ROTATE_FRAME_BUFFER_90|ROTATE_FRAME_BUFFER_270) )
+	{
+		mReported.Width = mPhysical.Height;
+		mReported.Height = mPhysical.Width;
+	}
+	else
+	{
+		mReported.Width = mPhysical.Width;
+		mReported.Height = mPhysical.Height;
+	}
+
+	VERBOSE_MESSAGE("Physical display resolution is " << mPhysical.Width << "x" << mPhysical.Height );
+
+	mPlatform->InitialiseDisplay();
+
 	SetRenderingDefaults();
 	BuildShaders();
 	BuildDebugTexture();
 	BuildPixelFontTexture();
 	InitFreeTypeFont();
 	AllocateQuadBuffers();
+
+	VERBOSE_MESSAGE("GLES Ready");
 }
 
 GLES::~GLES()
@@ -691,13 +793,6 @@ GLES::~GLES()
 		CHECK_OGL_ERRORS();
 	}
 
-	VERBOSE_MESSAGE("Clearing display");
-
-	VERBOSE_MESSAGE("Destroying contect");
-	eglDestroyContext(mPlatform->mDisplay, mPlatform->mContext);
-    eglDestroySurface(mPlatform->mDisplay, mPlatform->mSurface);
-    eglTerminate(mPlatform->mDisplay);
-
 	VERBOSE_MESSAGE("All done");
 }
 
@@ -715,8 +810,8 @@ bool GLES::BeginFrame()
 
 void GLES::EndFrame()
 {
-	eglSwapBuffers(mPlatform->mDisplay,mPlatform->mSurface);
 	glFlush();// This makes sure the display is fully up to date before we allow them to interact with any kind of UI. This is the specified use of this function.
+	mPlatform->SwapBuffers();
 	ProcessSystemEvents();
 }
 
@@ -733,30 +828,151 @@ void GLES::Clear(uint32_t pTexture)
 	CHECK_OGL_ERRORS();
 	FillRectangle(0,0,GetWidth(),GetHeight(),pTexture);
 }
+/*
+static const double PI = 3.141592654;
+static const double DEGTORAD = (PI / 180.0);
+
+static void MatrixSetRotationX(float m[4][4],float Angle)
+{
+	float sinZ = sin(Angle * DEGTORAD);
+	float cosZ = cos(Angle * DEGTORAD);
+
+	m[0][0] = cosZ;
+	m[0][1] = sinZ;
+	m[0][2] = 0.0f;
+	m[0][3] = 0.0f;
+
+	m[1][0] = -sinZ;
+	m[1][1] = cosZ;
+	m[1][2] = 0.0f;
+	m[1][3] = 0.0f;
+
+	m[2][0] = 0.0f;
+	m[2][1] = 0.0f;
+	m[2][2] = 1.0f;
+	m[2][3] = 0.0f;
+
+	m[3][0] = 1024.0f;
+	m[3][1] = 0.0f;
+	m[3][2] = 0.0f;
+	m[3][3] = 1.0f;
+}
+
+static void MatrixMul(float m[4][4],const float pA[4][4],const float pB[4][4])
+{
+
+	m[0][0] = (pA[0][0]*pB[0][0]) + (pA[0][1]*pB[1][0]) + (pA[0][2]*pB[2][0]) + (pA[0][3]*pB[3][0]);
+	m[0][1] = (pA[0][0]*pB[0][1]) + (pA[0][1]*pB[1][1]) + (pA[0][2]*pB[2][1]) + (pA[0][3]*pB[3][1]);
+	m[0][2] = (pA[0][0]*pB[0][2]) + (pA[0][1]*pB[1][2]) + (pA[0][2]*pB[2][2]) + (pA[0][3]*pB[3][2]);
+	m[0][3] = (pA[0][0]*pB[0][3]) + (pA[0][1]*pB[1][3]) + (pA[0][2]*pB[2][3]) + (pA[0][3]*pB[3][3]);
+
+	m[1][0] = (pA[1][0]*pB[0][0]) + (pA[1][1]*pB[1][0]) + (pA[1][2]*pB[2][0]) + (pA[1][3]*pB[3][0]);
+	m[1][1] = (pA[1][0]*pB[0][1]) + (pA[1][1]*pB[1][1]) + (pA[1][2]*pB[2][1]) + (pA[1][3]*pB[3][1]);
+	m[1][2] = (pA[1][0]*pB[0][2]) + (pA[1][1]*pB[1][2]) + (pA[1][2]*pB[2][2]) + (pA[1][3]*pB[3][2]);
+	m[1][3] = (pA[1][0]*pB[0][3]) + (pA[1][1]*pB[1][3]) + (pA[1][2]*pB[2][3]) + (pA[1][3]*pB[3][3]);
+
+	m[2][0] = (pA[2][0]*pB[0][0]) + (pA[2][1]*pB[1][0]) + (pA[2][2]*pB[2][0]) + (pA[2][3]*pB[3][0]);
+	m[2][1] = (pA[2][0]*pB[0][1]) + (pA[2][1]*pB[1][1]) + (pA[2][2]*pB[2][1]) + (pA[2][3]*pB[3][1]);
+	m[2][2] = (pA[2][0]*pB[0][2]) + (pA[2][1]*pB[1][2]) + (pA[2][2]*pB[2][2]) + (pA[2][3]*pB[3][2]);
+	m[2][3] = (pA[2][0]*pB[0][3]) + (pA[2][1]*pB[1][3]) + (pA[2][2]*pB[2][3]) + (pA[2][3]*pB[3][3]);
+
+	m[3][0] = (pA[3][0]*pB[0][0]) + (pA[3][1]*pB[1][0]) + (pA[3][2]*pB[2][0]) + (pA[3][3]*pB[3][0]);
+	m[3][1] = (pA[3][0]*pB[0][1]) + (pA[3][1]*pB[1][1]) + (pA[3][2]*pB[2][1]) + (pA[3][3]*pB[3][1]);
+	m[3][2] = (pA[3][0]*pB[0][2]) + (pA[3][1]*pB[1][2]) + (pA[3][2]*pB[2][2]) + (pA[3][3]*pB[3][2]);
+	m[3][3] = (pA[3][0]*pB[0][3]) + (pA[3][1]*pB[1][3]) + (pA[3][2]*pB[2][3]) + (pA[3][3]*pB[3][3]);
+}*/
 
 void GLES::SetFrustum2D()
 {
-	VERBOSE_MESSAGE("SetFrustum2D " << mWidth << " " << mHeight);
+	VERBOSE_MESSAGE("SetFrustum2D " << mPhysical.Width << " " << mPhysical.Height);
+/*
+	float projection[4][4],r[4][4];
 
-	mMatrices.projection[0][0] = 2.0f / (float)mWidth;
-	mMatrices.projection[0][1] = 0;
-	mMatrices.projection[0][2] = 0;
-	mMatrices.projection[0][3] = 0;
+	projection[0][0] = 2.0f / (float)mWidth;
+	projection[0][1] = 0;
+	projection[0][2] = 0;
+	projection[0][3] = 0;
 
-	mMatrices.projection[1][0] = 0;
-	mMatrices.projection[1][1] = -2.0f / (float)mHeight;
-	mMatrices.projection[1][2] = 0;
-	mMatrices.projection[1][3] = 0;
+	projection[1][0] = 0;
+	projection[1][1] = -2.0f / (float)mHeight;
+	projection[1][2] = 0;
+	projection[1][3] = 0;
 		  	
-	mMatrices.projection[2][0] = 0;
-	mMatrices.projection[2][1] = 0;
-	mMatrices.projection[2][2] = 0;
-	mMatrices.projection[2][3] = 0;
+	projection[2][0] = 0;
+	projection[2][1] = 0;
+	projection[2][2] = 0;
+	projection[2][3] = 0;
 		  	
-	mMatrices.projection[3][0] = -1;
-	mMatrices.projection[3][1] = 1;
-	mMatrices.projection[3][2] = 0;
-	mMatrices.projection[3][3] = 1;
+	projection[3][0] = -1;
+	projection[3][1] = 1;
+	projection[3][2] = 0;
+	projection[3][3] = 1;
+
+	MatrixSetRotationX(r,90.0f);
+
+	for( int a = 0 ; a < 4 ; a++ )
+	{
+		for( int b = 0 ; b < 4 ; b++ )
+		{
+			std::clog << projection[a][b] << "\n";
+		}
+	}
+	std::clog << "\n";
+	MatrixMul(mMatrices.projection,r,projection);
+
+	for( int a = 0 ; a < 4 ; a++ )
+	{
+		for( int b = 0 ; b < 4 ; b++ )
+		{
+			std::clog << mMatrices.projection[a][b] << "\n";
+		}
+	}
+*/
+
+	if( mCreateFlags&ROTATE_FRAME_BUFFER_90 )
+	{
+		mMatrices.projection[0][0] = 0;
+		mMatrices.projection[0][1] = -2.0f / (float)mPhysical.Height;
+		mMatrices.projection[0][2] = 0;
+		mMatrices.projection[0][3] = 0;
+
+		mMatrices.projection[1][0] = -2.0f / (float)mPhysical.Width;
+		mMatrices.projection[1][1] = 0;
+		mMatrices.projection[1][2] = 0;
+		mMatrices.projection[1][3] = 0;
+				
+		mMatrices.projection[2][0] = 0;
+		mMatrices.projection[2][1] = 0;
+		mMatrices.projection[2][2] = 0;
+		mMatrices.projection[2][3] = 0;
+				
+		mMatrices.projection[3][0] = 1;
+		mMatrices.projection[3][1] = 1;
+		mMatrices.projection[3][2] = 0;
+		mMatrices.projection[3][3] = 1;
+	}
+	else
+	{
+		mMatrices.projection[0][0] = 2.0f / (float)mPhysical.Width;
+		mMatrices.projection[0][1] = 0;
+		mMatrices.projection[0][2] = 0;
+		mMatrices.projection[0][3] = 0;
+
+		mMatrices.projection[1][0] = 0;
+		mMatrices.projection[1][1] = -2.0f / (float)mPhysical.Height;
+		mMatrices.projection[1][2] = 0;
+		mMatrices.projection[1][3] = 0;
+				
+		mMatrices.projection[2][0] = 0;
+		mMatrices.projection[2][1] = 0;
+		mMatrices.projection[2][2] = 0;
+		mMatrices.projection[2][3] = 0;
+				
+		mMatrices.projection[3][0] = -1;
+		mMatrices.projection[3][1] = 1;
+		mMatrices.projection[3][2] = 0;
+		mMatrices.projection[3][3] = 1;
+	}
 }
 
 void GLES::SetFrustum3D(float pFov, float pAspect, float pNear, float pFar)
@@ -1429,14 +1645,13 @@ uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,boo
 	if( scaleFrom.x == -1 || scaleFrom.y == -1 || scaleTo.x == -1 || scaleTo.y == -1 || 
 		fillFrom.x  == -1 || fillFrom.y  == -1 || fillTo.x  == -1 || fillTo.y  == -1 )
 	{
-		if( mVerbose )
-		{
-			std::clog << "Nine patch failure,\n";
-			std::clog << "   Scalable X " << scaleFrom.x << " " << scaleTo.x << "\n";
-			std::clog << "   Scalable Y " << scaleFrom.y << " " << scaleTo.y << "\n";
-			std::clog << "   Fillable X " << fillFrom.x << " " << fillTo.x << "\n";
-			std::clog << "   Fillable Y " << fillFrom.y << " " << fillTo.y << "\n";
-		}
+#ifdef VERBOSE_BUILD
+		std::clog << "Nine patch failure,\n";
+		std::clog << "   Scalable X " << scaleFrom.x << " " << scaleTo.x << "\n";
+		std::clog << "   Scalable Y " << scaleFrom.y << " " << scaleTo.y << "\n";
+		std::clog << "   Fillable X " << fillFrom.x << " " << fillTo.x << "\n";
+		std::clog << "   Fillable Y " << fillFrom.y << " " << fillTo.y << "\n";
+#endif
 		THROW_MEANINGFUL_EXCEPTION("Nine patch edge definition invlaid, not all scaling and filling information found. Is it a nine patch texture?");
 	}
 
@@ -1642,7 +1857,7 @@ int GLES::FontGetPrintfWidth(const char* pFmt,...)
 //*******************************************
 // Free type rendering
 #ifdef USE_FREETYPEFONTS
-uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerbose)
+uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight)
 {
 	FT_Face loadedFace;
 	if( FT_New_Face(mFreetype,pFontName.c_str(),0,&loadedFace) != 0 )
@@ -1651,7 +1866,7 @@ uint32_t GLES::FontLoad(const std::string& pFontName,int pPixelHeight,bool pVerb
 	}
 
 	const uint32_t fontID = mNextFontID++;
-	mFreeTypeFonts[fontID] = std::make_unique<FreeTypeFont>(loadedFace,pPixelHeight,pVerbose);
+	mFreeTypeFonts[fontID] = std::make_unique<FreeTypeFont>(loadedFace,pPixelHeight);
 
 	// Now we need to prepare the texture cache.
 	auto& font = mFreeTypeFonts.at(fontID);
@@ -1799,11 +2014,12 @@ void GLES::ProcessSystemEvents()
 		while( read(mPointer.mDevice,&ev,sizeof(ev)) > 0 )
 		{
 			// EV_SYN is a seperator of events.
-			if( mVerbose && ev.type != EV_ABS && ev.type != EV_KEY && ev.type != EV_SYN )
+#ifdef VERBOSE_BUILD
+			if( ev.type != EV_ABS && ev.type != EV_KEY && ev.type != EV_SYN )
 			{// Anything I missed? 
 				std::cout << std::hex << ev.type << " " << ev.code << " " << ev.value << "\n";
 			}
-
+#endif
 			switch( ev.type )
 			{
 			case EV_KEY:
@@ -1847,183 +2063,9 @@ void GLES::ProcessSystemEvents()
 	}
 }
 
-void GLES::FetchDisplayMode()
-{
-#ifdef PLATFORM_GLES
-	struct fb_var_screeninfo vinfo;
-	{
-		int File = open("/dev/fb0", O_RDWR);
-		if(ioctl(File, FBIOGET_VSCREENINFO, &vinfo) ) 
-		{
-			THROW_MEANINGFUL_EXCEPTION("failed to open ioctl");
-		}
-		close(File);
-	}
-
-	mWidth = vinfo.xres;
-	mHeight = vinfo.yres;
-
-	if( mWidth < 16 || mHeight < 16 )
-	{
-		THROW_MEANINGFUL_EXCEPTION("failed to find sensible screen mode from /dev/fb0");
-	}
-#endif
-
-#ifdef PLATFORM_X11_GL
-	mWidth = X11_EMULATION_WIDTH;
-	mHeight = X11_EMULATION_HEIGHT;
-#endif
-
-	VERBOSE_MESSAGE("Display resolution is " << mWidth << "x" << mHeight );
-}
-
-void GLES::InitialiseDisplay()
-{
-#ifdef BROADCOM_NATIVE_WINDOW
-	bcm_host_init();
-#endif
-
-#ifdef PLATFORM_GLES
-	VERBOSE_MESSAGE("Calling eglGetDisplay");
-	mPlatform->mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-	if( !mPlatform->mDisplay )
-	{
-		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
-	}
-
-	//Now we have a display lets initialize it.
-    EGLint majorVersion,minorVersion;
-	if( !eglInitialize(mPlatform->mDisplay, &majorVersion, &minorVersion) )
-	{
-		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
-	}
-	CHECK_OGL_ERRORS();
-	VERBOSE_MESSAGE("GLES version " << majorVersion << "." << minorVersion);
-	eglBindAPI(EGL_OPENGL_ES_API);
-	CHECK_OGL_ERRORS();
-#endif //#ifdef PLATFORM_GLES
-
-#ifdef PLATFORM_X11_GL
-	mPlatform->Create();
-#endif
-}
-
-void GLES::FindGLESConfiguration()
-{
-#ifdef PLATFORM_GLES
-	int depths_32_to_16[3] = {32,24,16};
-
-	for( int c = 0 ; c < 3 ; c++ )
-	{
-		const EGLint attrib_list[] =
-		{
-			EGL_RED_SIZE,			8,
-			EGL_GREEN_SIZE,			8,
-			EGL_BLUE_SIZE,			8,
-			EGL_ALPHA_SIZE,			8,
-			EGL_DEPTH_SIZE,			depths_32_to_16[c],
-			EGL_STENCIL_SIZE,		EGL_DONT_CARE,
-			EGL_RENDERABLE_TYPE,	EGL_OPENGL_ES2_BIT,
-			EGL_NONE,				EGL_NONE
-		};
-
-		EGLint numConfigs;
-		if( !eglChooseConfig(mPlatform->mDisplay,attrib_list,&mPlatform->mConfig,1, &numConfigs) )
-		{
-			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
-		}
-
-		if( numConfigs > 0 )
-		{
-			EGLint bufSize,r,g,b,a,z,s = 0;
-
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_BUFFER_SIZE,&bufSize);
-
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_RED_SIZE,&r);
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_GREEN_SIZE,&g);
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_BLUE_SIZE,&b);
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_ALPHA_SIZE,&a);
-
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_DEPTH_SIZE,&z);
-			eglGetConfigAttrib(mPlatform->mDisplay,mPlatform->mConfig,EGL_STENCIL_SIZE,&s);
-
-			CHECK_OGL_ERRORS();
-
-			VERBOSE_MESSAGE("Config found:");
-			VERBOSE_MESSAGE("\tFrame buffer size " << bufSize);
-			VERBOSE_MESSAGE("\tRGBA " << r << "," << g << "," << b << "," << a);
-			VERBOSE_MESSAGE("\tZBuffer " << z+s << "Z " << z << "S " << s);
-
-			return;// All good :)
-		}
-	}
-	THROW_MEANINGFUL_EXCEPTION("No matching EGL configs found");
-#endif //#ifdef PLATFORM_GLES
-}
-
-void GLES::CreateRenderingContext()
-{
-#ifdef PLATFORM_GLES
-	//We have our display and have chosen the config so now we are ready to create the rendering context.
-	VERBOSE_MESSAGE("Creating context");
-	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
-	mPlatform->mContext = eglCreateContext(mPlatform->mDisplay,mPlatform->mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
-	if( !mPlatform->mContext )
-	{
-		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
-	}
-
-// This is annoying but GLES is just broken on RPi and always has been.
-#ifdef BROADCOM_NATIVE_WINDOW
-	VC_RECT_T dst_rect;
-	VC_RECT_T src_rect;
-
-	dst_rect.x = 0;
-	dst_rect.y = 0;
-	dst_rect.width = mWidth;
-	dst_rect.height = mHeight;
-
-	src_rect.x = 0;
-	src_rect.y = 0;
-	src_rect.width = mWidth << 16;
-	src_rect.height = mHeight << 16;        
-
-	DISPMANX_DISPLAY_HANDLE_T dispman_display = vc_dispmanx_display_open( 0 /* LCD */);
-	DISPMANX_UPDATE_HANDLE_T dispman_update = vc_dispmanx_update_start( 0 );
-
-	DISPMANX_ELEMENT_HANDLE_T dispman_element = vc_dispmanx_element_add(
-			dispman_update,
-			dispman_display,
-			0,&dst_rect,
-			0,&src_rect,
-			DISPMANX_PROTECTION_NONE,
-			nullptr,nullptr,
-			DISPMANX_NO_ROTATE);
-
-	mPlatform->mNativeWindow.element = dispman_element;
-	mPlatform->mNativeWindow.width = mWidth;
-	mPlatform->mNativeWindow.height = mHeight;
-	vc_dispmanx_update_submit_sync( dispman_update );
-	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,&mPlatform->mNativeWindow,0);
-#else
-	mPlatform->mSurface = eglCreateWindowSurface(mPlatform->mDisplay,mPlatform->mConfig,mPlatform->mNativeWindow,0);
-#endif //BROADCOM_NATIVE_WINDOW
-
-
-	CHECK_OGL_ERRORS();
-	eglMakeCurrent(mPlatform->mDisplay, mPlatform->mSurface, mPlatform->mSurface, mPlatform->mContext );
-	eglQuerySurface(mPlatform->mDisplay, mPlatform->mSurface,EGL_WIDTH,  &mWidth);
-	eglQuerySurface(mPlatform->mDisplay, mPlatform->mSurface,EGL_HEIGHT, &mHeight);
-	CHECK_OGL_ERRORS();
-#endif //#ifdef PLATFORM_GLES
-}
-
 void GLES::SetRenderingDefaults()
 {
-	eglSwapInterval(mPlatform->mDisplay,1);
-	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
-
-	glViewport(0, 0, (GLsizei)mWidth, (GLsizei)mHeight);
+	glViewport(0, 0, (GLsizei)mPhysical.Width, (GLsizei)mPhysical.Height);
 	glDepthRangef(0.0f,1.0f);
 	glPixelStorei(GL_UNPACK_ALIGNMENT,1);
 	SetFrustum2D();
@@ -2068,7 +2110,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.ColourOnly = std::make_unique<GLShader>("ColourOnly",ColourOnly_VS,ColourOnly_PS,mVerbose);
+	mShaders.ColourOnly = std::make_unique<GLShader>("ColourOnly",ColourOnly_VS,ColourOnly_PS);
 
 	const char* TextureColour_VS = R"(
 		uniform mat4 u_proj_cam;
@@ -2095,7 +2137,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.TextureColour = std::make_unique<GLShader>("TextureColour",TextureColour_VS,TextureColour_PS,mVerbose);
+	mShaders.TextureColour = std::make_unique<GLShader>("TextureColour",TextureColour_VS,TextureColour_PS);
 
 	const char* TextureAlphaOnly_VS = R"(
 		uniform mat4 u_proj_cam;
@@ -2122,7 +2164,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.TextureAlphaOnly = std::make_unique<GLShader>("TextureAlphaOnly",TextureAlphaOnly_VS,TextureAlphaOnly_PS,mVerbose);
+	mShaders.TextureAlphaOnly = std::make_unique<GLShader>("TextureAlphaOnly",TextureAlphaOnly_VS,TextureAlphaOnly_PS);
 	
 	const char* SpriteShader_VS = R"(
 		uniform mat4 u_proj_cam;
@@ -2150,7 +2192,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.SpriteShader = std::make_unique<GLShader>("SpriteShader",SpriteShader_VS,SpriteShader_PS,mVerbose);
+	mShaders.SpriteShader = std::make_unique<GLShader>("SpriteShader",SpriteShader_VS,SpriteShader_PS);
 
 	const char* QuadBatchShader_VS = R"(
 		uniform mat4 u_proj_cam;
@@ -2203,7 +2245,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.QuadBatchShader = std::make_unique<GLShader>("QuadBatchShader",QuadBatchShader_VS,QuadBatchShader_PS,mVerbose);
+	mShaders.QuadBatchShader = std::make_unique<GLShader>("QuadBatchShader",QuadBatchShader_VS,QuadBatchShader_PS);
 }
 
 void GLES::SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
@@ -2238,7 +2280,7 @@ void GLES::EnableShader(TinyShader pShader)
 	assert( pShader );
 	if( mShaders.CurrentShader != pShader )
 	{
-//		VERBOSE_MESSAGE("Enabling shader " << pShader->mName << " in frame " << mDiagnostics.frameNumber );
+		VERBOSE_SHADER_MESSAGE("Enabling shader " << pShader->mName << " in frame " << mDiagnostics.frameNumber );
 		mShaders.CurrentShader = pShader;
 		pShader->Enable(mMatrices.projection);
 		pShader->SetTransform(mMatrices.transform);
@@ -2286,6 +2328,7 @@ void GLES::BuildDebugTexture()
 
 void GLES::BuildPixelFontTexture()
 {
+	VERBOSE_MESSAGE("Creating pixel font texture");
 	// This is alpha 4bits per pixel data. So we need to pad it out.
 	uint8_t* pixels = mWorkBuffers->scratchRam.Restart(256*256);
 	int n = 0;
@@ -2320,6 +2363,7 @@ void GLES::InitFreeTypeFont()
 
 void GLES::AllocateQuadBuffers()
 {
+	VERBOSE_MESSAGE("Creating quad buffers");
 	// Fill quad index buffer.
 	const size_t numIndices = mQuadBatch.IndicesPerQuad * mQuadBatch.MaxQuads;
 	const size_t sizeofQuadIndexBuffer = sizeof(uint16_t) * numIndices;
@@ -2337,6 +2381,7 @@ void GLES::AllocateQuadBuffers()
 		idx[4] = 2 + baseIndex;
 		idx[5] = 3 + baseIndex;
 	}
+
 	glGenBuffers(1,&mQuadBatch.IndicesBuffer);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,mQuadBatch.IndicesBuffer);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER,sizeofQuadIndexBuffer,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
@@ -2369,6 +2414,7 @@ void GLES::AllocateQuadBuffers()
 	glBindBuffer(GL_ARRAY_BUFFER,mQuadBatch.VerticesBuffer);
 	glBufferData(GL_ARRAY_BUFFER,sizeofQuadVertBuffer,mWorkBuffers->scratchRam.Data(),GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER,0);
+
 	CHECK_OGL_ERRORS();
 }
 
@@ -2440,18 +2486,17 @@ void GLES::CtrlHandler(int SigNum)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // GLES Shader definition
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFragment,bool pVerbose) :
+GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFragment) :
 	mName(pName),
-	mVerbose(pVerbose),
 	mEnableStreamUV(strstr(pVertex," a_uv0;")),
 	mEnableStreamTrans(strstr(pVertex," a_trans;"))
 {
-	VERBOSE_MESSAGE("GLShader::Create: " << mName);
+	VERBOSE_SHADER_MESSAGE("Creating " << mName);
 
 	mVertexShader = LoadShader(GL_VERTEX_SHADER,pVertex);
 	mFragmentShader = LoadShader(GL_FRAGMENT_SHADER,pFragment);
 
-	VERBOSE_MESSAGE("vertex("<<mVertexShader<<") fragment("<<mFragmentShader<<")");
+	VERBOSE_SHADER_MESSAGE("vertex("<<mVertexShader<<") fragment("<<mFragmentShader<<")");
 
 	mShader = glCreateProgram(); // create empty OpenGL Program
 	CHECK_OGL_ERRORS();
@@ -2495,7 +2540,7 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 		THROW_MEANINGFUL_EXCEPTION(error);
 	}
 
-	VERBOSE_MESSAGE("Shader: " << mName << " Compiled ok");
+	VERBOSE_SHADER_MESSAGE("Shader " << mName << " Compiled ok");
 
 	//Get the bits for the variables in the shader.
 	mUniforms.proj_cam = GetUniformLocation("u_proj_cam");
@@ -2509,7 +2554,7 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 
 GLShader::~GLShader()
 {
-	VERBOSE_MESSAGE("Deleting shader " << mName << " " << mShader);
+	VERBOSE_SHADER_MESSAGE("Deleting shader " << mName << " " << mShader);
 	
 	glDeleteShader(mVertexShader);
 	CHECK_OGL_ERRORS();
@@ -2529,10 +2574,10 @@ int GLShader::GetUniformLocation(const char* pName)
 
 	if( location < 0 )
 	{
-		VERBOSE_MESSAGE("Shader: " << mName << " Failed to find UniformLocation " << pName);
+		VERBOSE_SHADER_MESSAGE( mName << " Failed to find UniformLocation " << pName);
 	}
 
-	VERBOSE_MESSAGE("Shader: " << mName << " GetUniformLocation(" << pName << ") == " << location);
+	VERBOSE_SHADER_MESSAGE( mName << " GetUniformLocation(" << pName << ") == " << location);
 
 	return location;
 
@@ -2542,12 +2587,12 @@ void GLShader::BindAttribLocation(int location,const char* pName)
 {
 	glBindAttribLocation(mShader, location,pName);
 	CHECK_OGL_ERRORS();
-	VERBOSE_MESSAGE("Shader: " << mName << " AttribLocation("<< pName << "," << location << ")");
+	VERBOSE_SHADER_MESSAGE( mName << " AttribLocation("<< pName << "," << location << ")");
 }
 
 void GLShader::Enable(const float projInvcam[4][4])
 {
-//	VERBOSE_MESSAGE("shader: " << mName << " Enabling shader " << mShader );
+	VERBOSE_SHADER_MESSAGE(mName << " Enabling shader " << mShader );
 	assert(mShader);
     glUseProgram(mShader);
     CHECK_OGL_ERRORS();
@@ -2616,6 +2661,12 @@ int GLShader::LoadShader(int type, const char* shaderCode)
 	// create a vertex shader type (GLES20.GL_VERTEX_SHADER)
 	// or a fragment shader type (GLES20.GL_FRAGMENT_SHADER)
 	int shaderFrag = glCreateShader(type);
+
+	// If we're GLES system we need to add "precision highp float"
+#ifdef PLATFORM_GLES
+	const std::string glesShaderCode= std::string("precision highp float; ") + shaderCode;
+	shaderCode = glesShaderCode.c_str();
+#endif
 
 	// add the source code to the shader and compile it
 	glShaderSource(shaderFrag,1,&shaderCode,NULL);
@@ -2701,9 +2752,8 @@ void ReadOGLErrors(const char *pSource_file_name,int pLine_number)
  * One note, I don't do localisation. ASCII here. If you need all the characters then maybe add yourself or use a commercial grade GL engine. :) localisation is a BIG job!
  * Rendering is done in the GL code, this class is more of just a container.
  */
-FreeTypeFont::FreeTypeFont(FT_Face pFontFace,int pPixelHeight,bool pVerbose) :
+FreeTypeFont::FreeTypeFont(FT_Face pFontFace,int pPixelHeight) :
 	mFontName(pFontFace->family_name),
-	mVerbose(pVerbose),
 	mFace(pFontFace)
 {
 	if( FT_Set_Pixel_Sizes(mFace,0,pPixelHeight) == 0 )
@@ -2938,6 +2988,452 @@ void FreeTypeFont::BuildTexture(
 
 #endif //#ifdef USE_FREETYPEFONTS
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// EGL layer implementation
+#ifdef PLATFORM_EGL
+PlatformInterface::PlatformInterface()
+{
+	int File = open("/dev/fb0", O_RDWR);
+	if(ioctl(File, FBIOGET_VSCREENINFO, &mScreenInfo) ) 
+	{
+		THROW_MEANINGFUL_EXCEPTION("Failed to open ioctl on /dev/fb0. Can not fetch screen mode!");
+	}
+	close(File);
+
+	if( mScreenInfo.xres < 16 || mScreenInfo.yres < 16 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("failed to find sensible screen mode from /dev/fb0");
+	}
+}
+
+PlatformInterface::~PlatformInterface()
+{
+	VERBOSE_MESSAGE("Destroying context");
+	eglDestroyContext(mDisplay, mContext);
+    eglDestroySurface(mDisplay, mSurface);
+    eglTerminate(mDisplay);
+}
+
+void PlatformInterface::SwapBuffers()
+{
+	assert(mDisplay);
+	assert(mSurface);
+	eglSwapBuffers(mDisplay,mSurface);
+}
+
+void PlatformInterface::InitialiseDisplay()
+{
+#ifdef BROADCOM_NATIVE_WINDOW
+	bcm_host_init();
+#endif
+
+	VERBOSE_MESSAGE("Calling eglGetDisplay");
+	mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+	if( !mDisplay )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
+	}
+
+	//Now we have a display lets initialize it.
+	EGLint majorVersion,minorVersion;
+	if( !eglInitialize(mDisplay, &majorVersion, &minorVersion) )
+	{
+		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
+	}
+	CHECK_OGL_ERRORS();
+	VERBOSE_MESSAGE("EGL version " << majorVersion << "." << minorVersion);
+	eglBindAPI(EGL_OPENGL_ES_API);
+	CHECK_OGL_ERRORS();
+
+	FindEGLConfiguration();
+
+	//We have our display and have chosen the config so now we are ready to create the rendering context.
+	VERBOSE_MESSAGE("Creating context");
+	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+	mContext = eglCreateContext(mDisplay,mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
+	if( !mContext )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
+	}
+
+// This is annoying but GLES is just broken on RPi 3,2,1 and always has been and always will be. RPi4 is now DRM.
+#ifdef BROADCOM_NATIVE_WINDOW
+	VC_RECT_T dst_rect;
+	VC_RECT_T src_rect;
+
+	dst_rect.x = 0;
+	dst_rect.y = 0;
+	dst_rect.width = GetWidth();
+	dst_rect.height = GetHeight();
+
+	src_rect.x = 0;
+	src_rect.y = 0;
+	src_rect.width = dst_rect.width << 16;
+	src_rect.height = dst_rect.height << 16;        
+
+	DISPMANX_DISPLAY_HANDLE_T dispman_display = vc_dispmanx_display_open( 0 /* LCD */);
+	DISPMANX_UPDATE_HANDLE_T dispman_update = vc_dispmanx_update_start( 0 );
+
+	DISPMANX_ELEMENT_HANDLE_T dispman_element = vc_dispmanx_element_add(
+			dispman_update,
+			dispman_display,
+			0,&dst_rect,
+			0,&src_rect,
+			DISPMANX_PROTECTION_NONE,
+			nullptr,nullptr,
+			DISPMANX_NO_ROTATE);
+
+	mNativeWindow.element = dispman_element;
+	mNativeWindow.width = GetWidth();
+	mNativeWindow.height =  GetHeight();
+	vc_dispmanx_update_submit_sync( dispman_update );
+	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
+#else
+	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
+#endif //BROADCOM_NATIVE_WINDOW
+	CHECK_OGL_ERRORS();
+
+	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
+	CHECK_OGL_ERRORS();
+
+	eglSwapInterval(mDisplay,1);
+	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
+}
+
+void PlatformInterface::FindEGLConfiguration()
+{
+	int depths_32_to_16[3] = {32,24,16};
+
+	for( int c = 0 ; c < 3 ; c++ )
+	{
+		const EGLint attrib_list[] =
+		{
+			EGL_RED_SIZE,			8,
+			EGL_GREEN_SIZE,			8,
+			EGL_BLUE_SIZE,			8,
+			EGL_ALPHA_SIZE,			8,
+			EGL_DEPTH_SIZE,			depths_32_to_16[c],
+			EGL_STENCIL_SIZE,		EGL_DONT_CARE,
+			EGL_RENDERABLE_TYPE,	EGL_OPENGL_ES2_BIT,
+			EGL_NONE,				EGL_NONE
+		};
+
+		EGLint numConfigs;
+		if( !eglChooseConfig(mDisplay,attrib_list,&mConfig,1, &numConfigs) )
+		{
+			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
+		}
+
+		if( numConfigs > 0 )
+		{
+			EGLint bufSize,r,g,b,a,z,s = 0;
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_BUFFER_SIZE,&bufSize);
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_RED_SIZE,&r);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_GREEN_SIZE,&g);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_BLUE_SIZE,&b);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_ALPHA_SIZE,&a);
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_DEPTH_SIZE,&z);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_STENCIL_SIZE,&s);
+
+			CHECK_OGL_ERRORS();
+
+			VERBOSE_MESSAGE("Config found:");
+			VERBOSE_MESSAGE("\tFrame buffer size " << bufSize);
+			VERBOSE_MESSAGE("\tRGBA " << r << "," << g << "," << b << "," << a);
+			VERBOSE_MESSAGE("\tZBuffer " << z+s << "Z " << z << "S " << s);
+
+			return;// All good :)
+		}
+	}
+	THROW_MEANINGFUL_EXCEPTION("No matching EGL configs found");
+}
+#endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Direct Render Manager layer implementation
+// DRM Direct Render Manager hidden definition.
+// Used for more model systems like RPi4 and proper GL / GLES implementations.
+#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+PlatformInterface::PlatformInterface()
+{
+	if( drmAvailable() == 0 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Kernel DRM driver not loaded");
+	}
+
+	// Lets go searching for a connected direct render manager device.
+	// Later I could add a param to allow user to specify this.
+	drmDevicePtr devices[8] = { NULL };
+	int num_devices = drmGetDevices2(0, devices, 8);
+	if (num_devices < 0)
+	{
+		THROW_MEANINGFUL_EXCEPTION("drmGetDevices2 failed: " + std::string(strerror(-num_devices)) );
+	}
+
+	mDRMFile = -1;
+	for( int n = 0 ; n < num_devices && mDRMFile < 0 ; n++ )
+	{
+		if( devices[n]->available_nodes&(1 << DRM_NODE_PRIMARY) )
+		{
+			// See if we can open it...
+			VERBOSE_MESSAGE("Trying DRM device " << std::string(devices[n]->nodes[DRM_NODE_PRIMARY]));
+			mDRMFile = open(devices[n]->nodes[DRM_NODE_PRIMARY], O_RDWR);
+		}
+	}
+	drmFreeDevices(devices, num_devices);
+
+	if( mDRMFile < 0 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find and open direct rendering manager device" );
+	}
+	drmModeRes* resources = drmModeGetResources(mDRMFile);
+	if( resources == nullptr )
+	{
+		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode resources");
+	}
+
+	drmModeConnector* connector = nullptr;
+	for(int n = 0 ; n < resources->count_connectors && connector == nullptr ; n++ )
+	{
+		connector = drmModeGetConnector(mDRMFile, resources->connectors[n]);
+		if( connector && connector->connection != DRM_MODE_CONNECTED )
+		{// Not connected, check next one...
+			drmModeFreeConnector(connector);
+			connector = nullptr;
+		}
+	}
+	if( connector == nullptr )
+	{
+		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed get mode connector");
+	}
+	mConnector = connector;
+
+	for( int i = 0 ; i < connector->count_modes && mModeInfo == nullptr ; i++ )
+	{
+		if( connector->modes[i].type & DRM_MODE_TYPE_PREFERRED )
+		{// DRM really wants us to use this, this should be the best option for LCD displays.
+			mModeInfo = &connector->modes[i];
+			VERBOSE_MESSAGE("Preferred screen mode found");
+		}
+	}
+
+	if( GetWidth() == 0 || GetHeight() == 0 )
+	{
+		THROW_MEANINGFUL_EXCEPTION("DirectRenderManager: Failed to find screen mode");
+	}
+
+	// Now grab the encoder, we need it for the CRTC ID. This is display connected to the conector.
+	for( int n = 0 ; n < resources->count_encoders && mModeEncoder == nullptr ; n++ )
+	{
+		drmModeEncoder *encoder = drmModeGetEncoder(mDRMFile, resources->encoders[n]);
+		if( encoder->encoder_id == connector->encoder_id )
+		{
+			mModeEncoder = encoder;
+		}
+		else
+		{
+			drmModeFreeEncoder(encoder);
+		}
+	}
+
+	drmModeFreeResources(resources);	
+}
+
+PlatformInterface::~PlatformInterface()
+{
+	VERBOSE_MESSAGE("Destroying context");
+	eglDestroyContext(mDisplay, mContext);
+    eglDestroySurface(mDisplay, mSurface);
+    eglTerminate(mDisplay);
+
+	VERBOSE_MESSAGE("Cleaning up DRM");
+	gbm_surface_destroy(mNativeWindow);
+	gbm_device_destroy(mBufferManager);
+	drmModeFreeEncoder(mModeEncoder);
+	drmModeFreeConnector(mConnector);
+	close(mDRMFile);
+}
+
+void PlatformInterface::InitialiseDisplay()
+{
+	VERBOSE_MESSAGE("Calling DRM InitialiseDisplay");
+
+	mBufferManager = gbm_create_device(mDRMFile);
+	mDisplay = eglGetDisplay(mBufferManager);
+	if( !mDisplay )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
+	}
+
+	//Now we have a display lets initialize it.
+	EGLint majorVersion,minorVersion;
+	if( !eglInitialize(mDisplay, &majorVersion, &minorVersion) )
+	{
+		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
+	}
+	CHECK_OGL_ERRORS();
+	VERBOSE_MESSAGE("EGL version " << majorVersion << "." << minorVersion);
+	eglBindAPI(EGL_OPENGL_ES_API);
+	CHECK_OGL_ERRORS();
+
+	FindEGLConfiguration();
+
+	//We have our display and have chosen the config so now we are ready to create the rendering context.
+	VERBOSE_MESSAGE("Creating context");
+	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+	mContext = eglCreateContext(mDisplay,mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
+	if( !mContext )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
+	}
+
+	mNativeWindow = gbm_surface_create(mBufferManager,GetWidth(), GetHeight(),mFOURCC_Format,GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
+	CHECK_OGL_ERRORS();
+
+	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
+	CHECK_OGL_ERRORS();
+}
+
+void PlatformInterface::FindEGLConfiguration()
+{
+	int depths_32_to_16[3] = {32,24,16};
+
+	for( int c = 0 ; c < 3 ; c++ )
+	{
+		const EGLint attrib_list[] =
+		{
+			EGL_RED_SIZE,			8,
+			EGL_GREEN_SIZE,			8,
+			EGL_BLUE_SIZE,			8,
+			EGL_ALPHA_SIZE,			8,
+			EGL_DEPTH_SIZE,			depths_32_to_16[c],
+			EGL_STENCIL_SIZE,		EGL_DONT_CARE,
+			EGL_RENDERABLE_TYPE,	EGL_OPENGL_ES2_BIT,
+			EGL_NONE,				EGL_NONE
+		};
+
+		EGLint numConfigs;
+		if( !eglChooseConfig(mDisplay,attrib_list,&mConfig,1, &numConfigs) )
+		{
+			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
+		}
+
+		if( numConfigs > 0 )
+		{
+			EGLint bufSize,r,g,b,a,z,s = 0;
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_BUFFER_SIZE,&bufSize);
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_RED_SIZE,&r);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_GREEN_SIZE,&g);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_BLUE_SIZE,&b);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_ALPHA_SIZE,&a);
+
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_DEPTH_SIZE,&z);
+			eglGetConfigAttrib(mDisplay,mConfig,EGL_STENCIL_SIZE,&s);
+
+			CHECK_OGL_ERRORS();
+
+			// Get the format we need DRM buffers to match.
+			if( r == 8 && g == 8 && b == 8 )
+			{
+				if( a == 8 )
+				{
+					mFOURCC_Format = DRM_FORMAT_ARGB8888;
+				}
+				else
+				{
+					mFOURCC_Format = DRM_FORMAT_RGB888;
+				}
+			}
+			else
+			{
+				mFOURCC_Format = DRM_FORMAT_RGB565;
+			}
+
+			VERBOSE_MESSAGE("Config found:");
+			VERBOSE_MESSAGE("\tFrame buffer size " << bufSize);
+			VERBOSE_MESSAGE("\tRGBA " << r << "," << g << "," << b << "," << a);
+			VERBOSE_MESSAGE("\tZBuffer " << z+s << "Z " << z << "S " << s);
+
+			return;// All good :)
+		}
+	}
+	THROW_MEANINGFUL_EXCEPTION("No matching EGL configs found");
+}
+
+static void drm_fb_destroy_callback(struct gbm_bo *bo, void *data)
+{
+	uint32_t* user_data = (uint32_t*)data;
+	delete user_data;
+}
+
+void PlatformInterface::UpdateCurrentBuffer()
+{
+	assert(mNativeWindow);
+	mCurrentFrontBufferObject = gbm_surface_lock_front_buffer(mNativeWindow);
+	if( mCurrentFrontBufferObject == nullptr )
+	{
+		THROW_MEANINGFUL_EXCEPTION("Failed to lock front buffer from native window.");
+	}
+
+	uint32_t* user_data = (uint32_t*)gbm_bo_get_user_data(mCurrentFrontBufferObject);
+	if( user_data == nullptr )
+	{
+		// Annoying JIT allocation. Should only happen twice.
+		// Should look at removing the need for the libgbm
+
+		const uint32_t handles[4] = {gbm_bo_get_handle(mCurrentFrontBufferObject).u32,0,0,0};
+		const uint32_t strides[4] = {gbm_bo_get_stride(mCurrentFrontBufferObject),0,0,0};
+		const uint32_t offsets[4] = {0,0,0,0};
+
+		user_data = new uint32_t;
+		int ret = drmModeAddFB2(mDRMFile, GetWidth(), GetHeight(), mFOURCC_Format,handles, strides, offsets, user_data, 0);
+		if (ret)
+		{
+			THROW_MEANINGFUL_EXCEPTION("failed to create frame buffer " + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
+		}
+		gbm_bo_set_user_data(mCurrentFrontBufferObject,user_data, drm_fb_destroy_callback);
+		VERBOSE_MESSAGE("JIT allocating drm frame buffer " << (*user_data));
+	}
+	mCurrentFrontBufferID = *user_data;
+}
+
+void PlatformInterface::SwapBuffers()
+{
+	eglSwapBuffers(mDisplay,mSurface);
+
+	UpdateCurrentBuffer();
+
+	if( mIsFirstFrame )
+	{
+		mIsFirstFrame = false;
+		assert(mModeEncoder);
+		assert(mConnector);
+		assert(mModeInfo);
+
+		int ret = drmModeSetCrtc(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID, 0, 0,&mConnector->connector_id, 1, mModeInfo);
+		if (ret)
+		{
+			THROW_MEANINGFUL_EXCEPTION("drmModeSetCrtc failed to set mode" + std::string(strerror(ret)) + " " + std::string(strerror(errno)) );
+		}
+	}
+
+	int ret = drmModePageFlip(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID,DRM_MODE_PAGE_FLIP_ASYNC,NULL);
+	if (ret)
+	{
+		THROW_MEANINGFUL_EXCEPTION("drmModePageFlip failed to queue page flip");
+	}
+	gbm_surface_release_buffer(mNativeWindow,mCurrentFrontBufferObject);
+}
+
+#endif //#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // PLATFORM_X11_GL Implementation.
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2945,8 +3441,7 @@ void FreeTypeFont::BuildTexture(
 /**
  * @brief The TinyGLES codebase is expected to be used for a system not running X11. But to aid development there is an option to 'emulate' a frame buffer with an X11 window.
  */
-PlatformInterface::PlatformInterface(bool pVerbose):
-	mVerbose(pVerbose),
+PlatformInterface::PlatformInterface():
 	mXDisplay(NULL),
 	mWindow(0),
 	mWindowReady(false)
@@ -2970,7 +3465,7 @@ PlatformInterface::~PlatformInterface()
 	mXDisplay = nullptr;
 }
 
-void PlatformInterface::Create()
+void PlatformInterface::InitialiseDisplay()
 {
 	VERBOSE_MESSAGE("Making X11 window for GLES emulation");
 
@@ -3139,7 +3634,7 @@ bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEve
 	return false;
 }
 
-void PlatformInterface::RedrawWindow()
+void PlatformInterface::SwapBuffers()
 {
 	assert( mWindowReady );
 	if( mXDisplay == nullptr )

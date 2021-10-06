@@ -73,7 +73,7 @@ int main(int argc, char *argv[])
     std::cout << "Build date " << APP_BUILD_DATE << '\n';
     std::cout << "Build time " << APP_BUILD_TIME << '\n';
 
-    tinygles::GLES GL(true);
+    tinygles::GLES GL;
 
     // Load in a test texture
     uint32_t Bird_by_Magnus = LoadTexture(GL,"../data/Bird_by_Magnus.png");

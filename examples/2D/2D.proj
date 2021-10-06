@@ -31,17 +31,19 @@
             "define": [
                 "DEBUG_BUILD",
                 "BROADCOM_NATIVE_WINDOW",
+                "PLATFORM_EGL",
                 "PLATFORM_GLES"
             ]
         },
-        "GLES-debug":
+        "DRM-debug":
         {
             "default": false,
             "enable_all_warnings": false,
             "standard": "c++17",
             "include":
             [
-                "../.."
+                "../..",
+                "/usr/include/libdrm"
             ],
             "libs":
             [
@@ -49,13 +51,16 @@
                 "pthread",
                 "m",
                 "GLESv2",
-                "EGL"
+                "EGL",
+                "gbm",
+                "drm"
             ],
             "define": [
                 "DEBUG_BUILD",
+                "PLATFORM_DIRECT_RENDER_MANAGER",
                 "PLATFORM_GLES",
-                "EGL_NO_X11",
-                "MESA_EGL_NO_X11_HEADERS"
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD"
             ]
         },
         "X11-debug":
@@ -79,9 +84,10 @@
             ],
             "define": [
                 "DEBUG_BUILD",
-                "PLATFORM_X11_GL"
+                "PLATFORM_X11_GL",
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD"
             ]
         }
-    },
-    "version": "0.0.1"
+    }
 }
