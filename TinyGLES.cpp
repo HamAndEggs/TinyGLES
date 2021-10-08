@@ -929,49 +929,39 @@ void GLES::SetFrustum2D()
 	}
 */
 
+	memset(mMatrices.projection,0,sizeof(mMatrices.projection));
+	mMatrices.projection[3][3] = 1;
+
 	if( mCreateFlags&ROTATE_FRAME_BUFFER_90 )
 	{
-		mMatrices.projection[0][0] = 0;
 		mMatrices.projection[0][1] = -2.0f / (float)mPhysical.Height;
-		mMatrices.projection[0][2] = 0;
-		mMatrices.projection[0][3] = 0;
-
 		mMatrices.projection[1][0] = -2.0f / (float)mPhysical.Width;
-		mMatrices.projection[1][1] = 0;
-		mMatrices.projection[1][2] = 0;
-		mMatrices.projection[1][3] = 0;
-				
-		mMatrices.projection[2][0] = 0;
-		mMatrices.projection[2][1] = 0;
-		mMatrices.projection[2][2] = 0;
-		mMatrices.projection[2][3] = 0;
 				
 		mMatrices.projection[3][0] = 1;
 		mMatrices.projection[3][1] = 1;
-		mMatrices.projection[3][2] = 0;
-		mMatrices.projection[3][3] = 1;
+	}
+	else if( mCreateFlags&ROTATE_FRAME_BUFFER_180 )
+	{
+		mMatrices.projection[0][0] = -2.0f / (float)mPhysical.Width;
+		mMatrices.projection[1][1] = 2.0f / (float)mPhysical.Height;
+				
+		mMatrices.projection[3][0] = 1;
+		mMatrices.projection[3][1] = -1;
+	}
+	else if( mCreateFlags&ROTATE_FRAME_BUFFER_270 )
+	{
+		mMatrices.projection[0][1] = 2.0f / (float)mPhysical.Height;
+		mMatrices.projection[1][0] = 2.0f / (float)mPhysical.Width;
+				
+		mMatrices.projection[3][0] = -1;
+		mMatrices.projection[3][1] = -1;
 	}
 	else
 	{
 		mMatrices.projection[0][0] = 2.0f / (float)mPhysical.Width;
-		mMatrices.projection[0][1] = 0;
-		mMatrices.projection[0][2] = 0;
-		mMatrices.projection[0][3] = 0;
-
-		mMatrices.projection[1][0] = 0;
 		mMatrices.projection[1][1] = -2.0f / (float)mPhysical.Height;
-		mMatrices.projection[1][2] = 0;
-		mMatrices.projection[1][3] = 0;
-				
-		mMatrices.projection[2][0] = 0;
-		mMatrices.projection[2][1] = 0;
-		mMatrices.projection[2][2] = 0;
-		mMatrices.projection[2][3] = 0;
-				
 		mMatrices.projection[3][0] = -1;
 		mMatrices.projection[3][1] = 1;
-		mMatrices.projection[3][2] = 0;
-		mMatrices.projection[3][3] = 1;
 	}
 }
 
