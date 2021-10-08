@@ -99,6 +99,7 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 #endif
 
 #ifdef VERBOSE_SHADER_BUILD
+	static std::string gCurrentShaderName;
 	#define VERBOSE_SHADER_MESSAGE(THE_MESSAGE__)	{std::clog << "Shader: " << THE_MESSAGE__ << "\n";}
 #else
 	#define VERBOSE_SHADER_MESSAGE(THE_MESSAGE__)
@@ -110,15 +111,15 @@ namespace tinygles{	// Using a namespace to try to prevent name clashes as my cl
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal structures.
 
-struct Vec2Df
+struct Vert2Df
 {
 	float x,y;
 };
 
-struct Vec2Ds
+struct Vert2Ds
 {
-	Vec2Ds() = default;
-	Vec2Ds(int16_t pX,int16_t pY):x(pX),y(pY){};
+	Vert2Ds() = default;
+	Vert2Ds(int16_t pX,int16_t pY):x(pX),y(pY){};
 	int16_t x,y;
 };
 
@@ -131,14 +132,14 @@ struct Vec2Db
 
 struct Quad2D
 {
-	Vec2Ds v[4];
+	Vert2Ds v[4];
 
 	const int16_t* data()const{return &v[0].x;}
 };
 
 struct Quad2Df
 {
-	Vec2Df v[4];
+	Vert2Df v[4];
 
 	const float* data()const{return &v[0].x;}
 };
@@ -163,7 +164,7 @@ struct NinePatch
 {
 	NinePatch() = delete;
 
-	NinePatch(int pWidth,int pHeight,const Vec2Ds& pScaleFrom,const Vec2Ds& pScaleTo,const Vec2Ds& pFillFrom,const Vec2Ds& pFillTo)
+	NinePatch(int pWidth,int pHeight,const Vert2Ds& pScaleFrom,const Vert2Ds& pScaleTo,const Vert2Ds& pFillFrom,const Vert2Ds& pFillTo)
 	{
 		mScalable.from = pScaleFrom;
 		mScalable.to = pScaleTo;
@@ -194,11 +195,11 @@ struct NinePatch
 
 	struct
 	{
-		Vec2Ds from,to;
+		Vert2Ds from,to;
 	}mScalable,mFillable;
 
-	Vec2Ds mVerts[4][4];
-	Vec2Ds mUVs[4][4];
+	Vert2Ds mVerts[4][4];
+	Vert2Ds mUVs[4][4];
 };
 
 enum struct StreamIndex
@@ -373,14 +374,14 @@ private:
 /**
  * @brief Simple utility for building quads on the fly.
  */
-struct Vec2DShortScratchBuffer : public ScratchBuffer<Vec2Ds,256,64,1024>
+struct Vert2DShortScratchBuffer : public ScratchBuffer<Vert2Ds,256,64,1024>
 {
 	/**
 	 * @brief Writes six vertices to the buffer.
 	 */
 	inline void BuildQuad(int pX,int pY,int pWidth,int pHeight)
 	{
-		Vec2Ds* verts = Next(6);
+		Vert2Ds* verts = Next(6);
 		verts[0].x = pX;			verts[0].y = pY;
 		verts[1].x = pX + pWidth;	verts[1].y = pY;
 		verts[2].x = pX + pWidth;	verts[2].y = pY + pHeight;
@@ -395,7 +396,7 @@ struct Vec2DShortScratchBuffer : public ScratchBuffer<Vec2Ds,256,64,1024>
 	 */
 	inline void AddUVRect(int U0,int V0,int U1,int V1)
 	{
-		Vec2Ds* verts = Next(6);
+		Vert2Ds* verts = Next(6);
 		verts[0].x = U0;	verts[0].y = V0;
 		verts[1].x = U1;	verts[1].y = V0;
 		verts[2].x = U1;	verts[2].y = V1;
@@ -420,9 +421,9 @@ struct Vec2DShortScratchBuffer : public ScratchBuffer<Vec2Ds,256,64,1024>
 struct WorkBuffers
 {
 	ScratchBuffer<uint8_t,128,16,512*512*4> scratchRam;// gets used for some temporary texture operations.
-	ScratchBuffer<Vec2Df,128,16,128> vec2Df;
-	Vec2DShortScratchBuffer vec2Ds;
-	Vec2DShortScratchBuffer uvShort;
+	ScratchBuffer<Vert2Df,128,16,128> vertices2Df;
+	Vert2DShortScratchBuffer vertices2DShort;
+	Vert2DShortScratchBuffer uvShort;
 };
 
 // End of scratch memory buffer utility
@@ -517,6 +518,158 @@ struct FreeTypeFont
 #endif // #ifdef USE_FREETYPEFONTS
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Some basic matrix operations
+static const double PI = 3.141592654;
+static const double DEGTORAD = (PI / 180.0);
+
+void Matrix::SetIdentity()
+{
+	m[0][0] = 1.0f;
+	m[0][1] = 0.0f;
+	m[0][2] = 0.0f;
+	m[0][3] = 0.0f;
+
+	m[1][0] = 0.0f;
+	m[1][1] = 1.0f;
+	m[1][2] = 0.0f;
+	m[1][3] = 0.0f;
+
+	m[2][0] = 0.0f;
+	m[2][1] = 0.0f;
+	m[2][2] = 1.0f;
+	m[2][3] = 0.0f;
+
+	m[3][0] = 0.0f;
+	m[3][1] = 0.0f;
+	m[3][2] = 0.0f;
+	m[3][3] = 1.0f;
+}
+
+void Matrix::SetTranslation(float pX,float pY,float pZ)
+{
+	m[0][0] = 1.0f;
+	m[0][1] = 0.0f;
+	m[0][2] = 0.0f;
+	m[0][3] = 0.0f;
+
+	m[1][0] = 0.0f;
+	m[1][1] = 1.0f;
+	m[1][2] = 0.0f;
+	m[1][3] = 0.0f;
+
+	m[2][0] = 0.0f;
+	m[2][1] = 0.0f;
+	m[2][2] = 1.0f;
+	m[2][3] = 0.0f;
+
+	m[3][0] = pX;
+	m[3][1] = pY;
+	m[3][2] = pZ;
+	m[3][3] = 1.0f;
+}
+
+void Matrix::SetRotationX(float pPitch)
+{
+	float sinX = std::sin(pPitch * DEGTORAD);
+	float cosX = std::cos(pPitch * DEGTORAD);
+
+	m[0][0] = 1.0f;
+	m[0][1] = 0.0f;
+	m[0][2] = 0.0f;
+	m[0][3] = 0.0f;
+
+	m[1][0] = 0.0f;
+	m[1][1] = cosX;
+	m[1][2] = sinX;
+	m[1][3] = 0.0f;
+
+	m[2][0] = 0.0f;
+	m[2][1] = -sinX;
+	m[2][2] = cosX;
+	m[2][3] = 0.0f;
+
+	m[3][0] = 0.0f;
+	m[3][1] = 0.0f;
+	m[3][2] = 0.0f;
+	m[3][3] = 1.0f;
+}
+
+void Matrix::SetRotationY(float pYaw)
+{
+	float sinY = std::sin(pYaw * DEGTORAD);
+	float cosY = std::cos(pYaw * DEGTORAD);
+
+	m[0][0] = cosY;
+	m[0][1] = 0.0f;
+	m[0][2] = -sinY;
+	m[0][3] = 0.0f;
+
+	m[1][0] = 0.0f;
+	m[1][1] = 1.0f;
+	m[1][2] = 0.0f;
+	m[1][3] = 0.0f;
+
+	m[2][0] = sinY;
+	m[2][1] = 0.0f;
+	m[2][2] = cosY;
+	m[2][3] = 0.0f;
+
+	m[3][0] = 0.0f;
+	m[3][1] = 0.0f;
+	m[3][2] = 0.0f;
+	m[3][3] = 1.0f;
+}
+
+void Matrix::SetRotationZ(float pRoll)
+{
+	float sinZ = std::sin(pRoll * DEGTORAD);
+	float cosZ = std::cos(pRoll * DEGTORAD);
+
+	m[0][0] = cosZ;
+	m[0][1] = sinZ;
+	m[0][2] = 0.0f;
+	m[0][3] = 0.0f;
+
+	m[1][0] = -sinZ;
+	m[1][1] = cosZ;
+	m[1][2] = 0.0f;
+	m[1][3] = 0.0f;
+
+	m[2][0] = 0.0f;
+	m[2][1] = 0.0f;
+	m[2][2] = 1.0f;
+	m[2][3] = 0.0f;
+
+	m[3][0] = 0.0f;
+	m[3][1] = 0.0f;
+	m[3][2] = 0.0f;
+	m[3][3] = 1.0f;
+}
+
+void Matrix::Mul(const Matrix &pA,const Matrix &pB)
+{
+	m[0][0] = (pA.m[0][0]*pB.m[0][0]) + (pA.m[0][1]*pB.m[1][0]) + (pA.m[0][2]*pB.m[2][0]) + (pA.m[0][3]*pB.m[3][0]);
+	m[0][1] = (pA.m[0][0]*pB.m[0][1]) + (pA.m[0][1]*pB.m[1][1]) + (pA.m[0][2]*pB.m[2][1]) + (pA.m[0][3]*pB.m[3][1]);
+	m[0][2] = (pA.m[0][0]*pB.m[0][2]) + (pA.m[0][1]*pB.m[1][2]) + (pA.m[0][2]*pB.m[2][2]) + (pA.m[0][3]*pB.m[3][2]);
+	m[0][3] = (pA.m[0][0]*pB.m[0][3]) + (pA.m[0][1]*pB.m[1][3]) + (pA.m[0][2]*pB.m[2][3]) + (pA.m[0][3]*pB.m[3][3]);
+
+	m[1][0] = (pA.m[1][0]*pB.m[0][0]) + (pA.m[1][1]*pB.m[1][0]) + (pA.m[1][2]*pB.m[2][0]) + (pA.m[1][3]*pB.m[3][0]);
+	m[1][1] = (pA.m[1][0]*pB.m[0][1]) + (pA.m[1][1]*pB.m[1][1]) + (pA.m[1][2]*pB.m[2][1]) + (pA.m[1][3]*pB.m[3][1]);
+	m[1][2] = (pA.m[1][0]*pB.m[0][2]) + (pA.m[1][1]*pB.m[1][2]) + (pA.m[1][2]*pB.m[2][2]) + (pA.m[1][3]*pB.m[3][2]);
+	m[1][3] = (pA.m[1][0]*pB.m[0][3]) + (pA.m[1][1]*pB.m[1][3]) + (pA.m[1][2]*pB.m[2][3]) + (pA.m[1][3]*pB.m[3][3]);
+
+	m[2][0] = (pA.m[2][0]*pB.m[0][0]) + (pA.m[2][1]*pB.m[1][0]) + (pA.m[2][2]*pB.m[2][0]) + (pA.m[2][3]*pB.m[3][0]);
+	m[2][1] = (pA.m[2][0]*pB.m[0][1]) + (pA.m[2][1]*pB.m[1][1]) + (pA.m[2][2]*pB.m[2][1]) + (pA.m[2][3]*pB.m[3][1]);
+	m[2][2] = (pA.m[2][0]*pB.m[0][2]) + (pA.m[2][1]*pB.m[1][2]) + (pA.m[2][2]*pB.m[2][2]) + (pA.m[2][3]*pB.m[3][2]);
+	m[2][3] = (pA.m[2][0]*pB.m[0][3]) + (pA.m[2][1]*pB.m[1][3]) + (pA.m[2][2]*pB.m[2][3]) + (pA.m[2][3]*pB.m[3][3]);
+
+	m[3][0] = (pA.m[3][0]*pB.m[0][0]) + (pA.m[3][1]*pB.m[1][0]) + (pA.m[3][2]*pB.m[2][0]) + (pA.m[3][3]*pB.m[3][0]);
+	m[3][1] = (pA.m[3][0]*pB.m[0][1]) + (pA.m[3][1]*pB.m[1][1]) + (pA.m[3][2]*pB.m[2][1]) + (pA.m[3][3]*pB.m[3][1]);
+	m[3][2] = (pA.m[3][0]*pB.m[0][2]) + (pA.m[3][1]*pB.m[1][2]) + (pA.m[3][2]*pB.m[2][2]) + (pA.m[3][3]*pB.m[3][2]);
+	m[3][3] = (pA.m[3][0]*pB.m[0][3]) + (pA.m[3][1]*pB.m[1][3]) + (pA.m[3][2]*pB.m[2][3]) + (pA.m[3][3]*pB.m[3][3]);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // GLES Shader definition
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 struct GLShader
@@ -538,6 +691,7 @@ struct GLShader
 	const std::string mName;	//!< Mainly to help debugging.
 	const bool mEnableStreamUV;
 	const bool mEnableStreamTrans;
+	const bool mEnableStreamColour;
 
 	GLint mShader = 0;
 	GLint mVertexShader = 0;
@@ -750,8 +904,8 @@ GLES::~GLES()
 	VERBOSE_MESSAGE("GLES destructor called");
 
 	VERBOSE_MESSAGE("On exit the following scratch memory buffers reached the sizes of...");
-	VERBOSE_MESSAGE("    mWorkBuffers.vec2Df " << mWorkBuffers->vec2Df.MemoryUsed() << " bytes");
-	VERBOSE_MESSAGE("    mWorkBuffers.vec2Ds " << mWorkBuffers->vec2Ds.MemoryUsed() << " bytes");
+	VERBOSE_MESSAGE("    mWorkBuffers.vertices2Df " << mWorkBuffers->vertices2Df.MemoryUsed() << " bytes");
+	VERBOSE_MESSAGE("    mWorkBuffers.vertices2DShort " << mWorkBuffers->vertices2DShort.MemoryUsed() << " bytes");
 	VERBOSE_MESSAGE("    mWorkBuffers.uvShort " << mWorkBuffers->uvShort.MemoryUsed() << " bytes");
 
 	glBindTexture(GL_TEXTURE_2D,0);
@@ -767,11 +921,11 @@ GLES::~GLES()
 	glDeleteBuffers(1,&mQuadBatch.IndicesBuffer);
 
 	mShaders.CurrentShader.reset();
-	mShaders.ColourOnly.reset();
-	mShaders.TextureColour.reset();
-	mShaders.TextureAlphaOnly.reset();
-	mShaders.SpriteShader.reset();
-	mShaders.QuadBatchShader.reset();
+	mShaders.ColourOnly2D.reset();
+	mShaders.TextureColour2D.reset();
+	mShaders.TextureAlphaOnly2D.reset();
+	mShaders.SpriteShader2D.reset();
+	mShaders.QuadBatchShader2D.reset();
 
 	// delete all free type fonts.
 #ifdef USE_FREETYPEFONTS
@@ -802,7 +956,7 @@ bool GLES::BeginFrame()
 
 	// Reset some items so that we have a working render setup to begin the frame with.
 	// This is done so that I don't have to have a load of if statements to deal with first frame. Also makes life simpler for the more minimal applications.
-	EnableShader(mShaders.ColourOnly);
+	EnableShader(mShaders.ColourOnly2D);
 	SetTransformIdentity();
 
 	return GLES::mKeepGoing;
@@ -828,107 +982,9 @@ void GLES::Clear(uint32_t pTexture)
 	CHECK_OGL_ERRORS();
 	FillRectangle(0,0,GetWidth(),GetHeight(),pTexture);
 }
-/*
-static const double PI = 3.141592654;
-static const double DEGTORAD = (PI / 180.0);
-
-static void MatrixSetRotationX(float m[4][4],float Angle)
-{
-	float sinZ = sin(Angle * DEGTORAD);
-	float cosZ = cos(Angle * DEGTORAD);
-
-	m[0][0] = cosZ;
-	m[0][1] = sinZ;
-	m[0][2] = 0.0f;
-	m[0][3] = 0.0f;
-
-	m[1][0] = -sinZ;
-	m[1][1] = cosZ;
-	m[1][2] = 0.0f;
-	m[1][3] = 0.0f;
-
-	m[2][0] = 0.0f;
-	m[2][1] = 0.0f;
-	m[2][2] = 1.0f;
-	m[2][3] = 0.0f;
-
-	m[3][0] = 1024.0f;
-	m[3][1] = 0.0f;
-	m[3][2] = 0.0f;
-	m[3][3] = 1.0f;
-}
-
-static void MatrixMul(float m[4][4],const float pA[4][4],const float pB[4][4])
-{
-
-	m[0][0] = (pA[0][0]*pB[0][0]) + (pA[0][1]*pB[1][0]) + (pA[0][2]*pB[2][0]) + (pA[0][3]*pB[3][0]);
-	m[0][1] = (pA[0][0]*pB[0][1]) + (pA[0][1]*pB[1][1]) + (pA[0][2]*pB[2][1]) + (pA[0][3]*pB[3][1]);
-	m[0][2] = (pA[0][0]*pB[0][2]) + (pA[0][1]*pB[1][2]) + (pA[0][2]*pB[2][2]) + (pA[0][3]*pB[3][2]);
-	m[0][3] = (pA[0][0]*pB[0][3]) + (pA[0][1]*pB[1][3]) + (pA[0][2]*pB[2][3]) + (pA[0][3]*pB[3][3]);
-
-	m[1][0] = (pA[1][0]*pB[0][0]) + (pA[1][1]*pB[1][0]) + (pA[1][2]*pB[2][0]) + (pA[1][3]*pB[3][0]);
-	m[1][1] = (pA[1][0]*pB[0][1]) + (pA[1][1]*pB[1][1]) + (pA[1][2]*pB[2][1]) + (pA[1][3]*pB[3][1]);
-	m[1][2] = (pA[1][0]*pB[0][2]) + (pA[1][1]*pB[1][2]) + (pA[1][2]*pB[2][2]) + (pA[1][3]*pB[3][2]);
-	m[1][3] = (pA[1][0]*pB[0][3]) + (pA[1][1]*pB[1][3]) + (pA[1][2]*pB[2][3]) + (pA[1][3]*pB[3][3]);
-
-	m[2][0] = (pA[2][0]*pB[0][0]) + (pA[2][1]*pB[1][0]) + (pA[2][2]*pB[2][0]) + (pA[2][3]*pB[3][0]);
-	m[2][1] = (pA[2][0]*pB[0][1]) + (pA[2][1]*pB[1][1]) + (pA[2][2]*pB[2][1]) + (pA[2][3]*pB[3][1]);
-	m[2][2] = (pA[2][0]*pB[0][2]) + (pA[2][1]*pB[1][2]) + (pA[2][2]*pB[2][2]) + (pA[2][3]*pB[3][2]);
-	m[2][3] = (pA[2][0]*pB[0][3]) + (pA[2][1]*pB[1][3]) + (pA[2][2]*pB[2][3]) + (pA[2][3]*pB[3][3]);
-
-	m[3][0] = (pA[3][0]*pB[0][0]) + (pA[3][1]*pB[1][0]) + (pA[3][2]*pB[2][0]) + (pA[3][3]*pB[3][0]);
-	m[3][1] = (pA[3][0]*pB[0][1]) + (pA[3][1]*pB[1][1]) + (pA[3][2]*pB[2][1]) + (pA[3][3]*pB[3][1]);
-	m[3][2] = (pA[3][0]*pB[0][2]) + (pA[3][1]*pB[1][2]) + (pA[3][2]*pB[2][2]) + (pA[3][3]*pB[3][2]);
-	m[3][3] = (pA[3][0]*pB[0][3]) + (pA[3][1]*pB[1][3]) + (pA[3][2]*pB[2][3]) + (pA[3][3]*pB[3][3]);
-}*/
 
 void GLES::SetFrustum2D()
 {
-	VERBOSE_MESSAGE("SetFrustum2D " << mPhysical.Width << " " << mPhysical.Height);
-/*
-	float projection[4][4],r[4][4];
-
-	projection[0][0] = 2.0f / (float)mWidth;
-	projection[0][1] = 0;
-	projection[0][2] = 0;
-	projection[0][3] = 0;
-
-	projection[1][0] = 0;
-	projection[1][1] = -2.0f / (float)mHeight;
-	projection[1][2] = 0;
-	projection[1][3] = 0;
-		  	
-	projection[2][0] = 0;
-	projection[2][1] = 0;
-	projection[2][2] = 0;
-	projection[2][3] = 0;
-		  	
-	projection[3][0] = -1;
-	projection[3][1] = 1;
-	projection[3][2] = 0;
-	projection[3][3] = 1;
-
-	MatrixSetRotationX(r,90.0f);
-
-	for( int a = 0 ; a < 4 ; a++ )
-	{
-		for( int b = 0 ; b < 4 ; b++ )
-		{
-			std::clog << projection[a][b] << "\n";
-		}
-	}
-	std::clog << "\n";
-	MatrixMul(mMatrices.projection,r,projection);
-
-	for( int a = 0 ; a < 4 ; a++ )
-	{
-		for( int b = 0 ; b < 4 ; b++ )
-		{
-			std::clog << mMatrices.projection[a][b] << "\n";
-		}
-	}
-*/
-
 	memset(mMatrices.projection,0,sizeof(mMatrices.projection));
 	mMatrices.projection[3][3] = 1;
 
@@ -967,8 +1023,6 @@ void GLES::SetFrustum2D()
 
 void GLES::SetFrustum3D(float pFov, float pAspect, float pNear, float pFar)
 {
-	VERBOSE_MESSAGE("SetFrustum3D " << pFov << " " << pAspect << " " << pNear << " " << pFar);
-	
 	float cotangent = 1.0f / tanf(DegreeToRadian(pFov));
 	float q = pFar / (pFar - pNear);
 
@@ -1047,7 +1101,7 @@ void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGr
 {
 	const int16_t quad[4] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY};
 
-	EnableShader(mShaders.ColourOnly);
+	EnableShader(mShaders.ColourOnly2D);
 	mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 
 	VertexPtr(2,GL_SHORT,quad);
@@ -1063,7 +1117,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	}
 	if( pNumPoints > 128 ){pNumPoints = 128;}	// Make sure we don't go silly with number of verts and loose all the FPS.
 
-	Vec2Df* verts = mWorkBuffers->vec2Df.Restart(pNumPoints);
+	Vert2Df* verts = mWorkBuffers->vertices2Df.Restart(pNumPoints);
 
 	float rad = 0.0;
 	const float step = GetRadian() / (float)(pNumPoints-2);//+2 is because of first triangle.
@@ -1076,7 +1130,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 		verts[n].y = y + (r*std::cos(rad));
 	}
 
-	EnableShader(mShaders.ColourOnly);
+	EnableShader(mShaders.ColourOnly2D);
 	mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 
 	VertexPtr(2,GL_FLOAT,verts);
@@ -1108,12 +1162,12 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 	// Need a multiple of 4 points.
 	numPoints = (numPoints+3)&~3;
 	if( numPoints > 128 ){numPoints = 128;}	// Make sure we don't go silly with number of verts and loose all the FPS.
-	Vec2Df* verts = mWorkBuffers->vec2Df.Restart(numPoints);
+	Vert2Df* verts = mWorkBuffers->vertices2Df.Restart(numPoints);
 
 	float rad = GetRadian();
 	const float step = GetRadian() / (float)(numPoints-1);
 	const float r = (float)pRadius;
-	Vec2Df* p = verts;
+	Vert2Df* p = verts;
 
 	pToX -= pRadius;
 	pToY -= pRadius;
@@ -1152,7 +1206,7 @@ void GLES::RoundedRectangle(int pFromX,int pFromY,int pToX,int pToY,int pRadius,
 		rad -= step;
 	}
 
-	EnableShader(mShaders.ColourOnly);
+	EnableShader(mShaders.ColourOnly2D);
 	mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
 
 	VertexPtr(2,GL_FLOAT,verts);
@@ -1233,11 +1287,11 @@ void GLES::SpriteDelete(uint32_t pSprite)
 
 void GLES::SpriteDraw(uint32_t pSprite)
 {
-	assert(mShaders.SpriteShader);
+	assert(mShaders.SpriteShader2D);
 
 	auto& sprite = mSprites.at(pSprite);
 
-	EnableShader(mShaders.SpriteShader);
+	EnableShader(mShaders.SpriteShader2D);
 
 	assert(mShaders.CurrentShader);
 	mShaders.CurrentShader->SetTexture(sprite->mTexture);
@@ -1304,13 +1358,13 @@ void GLES::QuadBatchDelete(uint32_t pQuadBatch)
 
 void GLES::QuadBatchDraw(uint32_t pQuadBatch)
 {
-	assert(mShaders.QuadBatchShader);
+	assert(mShaders.QuadBatchShader2D);
 
 	auto& QuadBatch = mQuadBatch.Batchs.at(pQuadBatch);
 
-	EnableShader(mShaders.QuadBatchShader);
+	EnableShader(mShaders.QuadBatchShader2D);
 
-	assert(mShaders.CurrentShader == mShaders.QuadBatchShader);
+	assert(mShaders.CurrentShader == mShaders.QuadBatchShader2D);
 	mShaders.CurrentShader->SetTexture(QuadBatch->mTexture);
 	mShaders.CurrentShader->SetGlobalColour(1.0f,1.0f,1.0f,1.0f);
 
@@ -1352,16 +1406,16 @@ void GLES::QuadBatchDraw(uint32_t pQuadBatch,size_t pFromIndex,size_t pToIndex)
 		return;// Allow this as their code may use this case at the start or end of an effect.
 	}
 
-	assert(mShaders.QuadBatchShader);
+	assert(mShaders.QuadBatchShader2D);
 
 	auto& QuadBatch = mQuadBatch.Batchs.at(pQuadBatch);
 
 	assert( pFromIndex < QuadBatch->GetNumQuads() );
 	assert( pToIndex < QuadBatch->GetNumQuads() );
 
-	EnableShader(mShaders.QuadBatchShader);
+	EnableShader(mShaders.QuadBatchShader2D);
 
-	assert(mShaders.CurrentShader == mShaders.QuadBatchShader);
+	assert(mShaders.CurrentShader == mShaders.QuadBatchShader2D);
 	mShaders.CurrentShader->SetTexture(QuadBatch->mTexture);
 	mShaders.CurrentShader->SetGlobalColour(1.0f,1.0f,1.0f,1.0f);
 
@@ -1404,6 +1458,42 @@ std::vector<QuadBatchTransform>& GLES::QuadBatchGetTransform(uint32_t pQuadBatch
 {
 	auto& QuadBatch = mQuadBatch.Batchs.at(pQuadBatch);
 	return QuadBatch->mTransforms;
+}
+
+//*******************************************
+// Primitive rendering functions for user defined shapes
+void GLES::RenderTriangles(const VerticesXYZC& pVertices)
+{
+		glDisable(GL_CULL_FACE);
+
+	EnableShader(mShaders.ColourOnly3D);
+
+	assert(mShaders.CurrentShader);
+	mShaders.CurrentShader->SetGlobalColour(1.0f,1.0f,1.0f,1.0f);
+
+	const uint8_t* verts = (const uint8_t*)pVertices.data();
+	const uint8_t* c = verts + (sizeof(float)*3);
+
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::VERTEX,
+				3,
+				GL_FLOAT,
+				GL_FALSE,
+				sizeof(VertXYZC),
+				verts);
+
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::COLOUR,
+				4,
+				GL_BYTE,
+				GL_TRUE,
+				sizeof(VertXYZC),
+				c);
+
+	
+
+	glDrawArrays(GL_TRIANGLES,0,pVertices.size());
+	CHECK_OGL_ERRORS();
 }
 
 //*******************************************
@@ -1587,10 +1677,10 @@ uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,boo
 	const int oldStride = pWidth * 4;
 
 	// Extract the information
-	Vec2Ds scaleFrom = {-1,-1};
-	Vec2Ds scaleTo = {-1,-1};
-	Vec2Ds fillFrom = {-1,-1};
-	Vec2Ds fillTo = {-1,-1};
+	Vert2Ds scaleFrom = {-1,-1};
+	Vert2Ds scaleTo = {-1,-1};
+	Vert2Ds fillFrom = {-1,-1};
+	Vert2Ds fillTo = {-1,-1};
 
 	auto ScanNinePatch = [](uint8_t pPixel,int16_t pIndex,int16_t &pFrom,int16_t &pTo,const std::string& pWhat)
 	{
@@ -1703,7 +1793,7 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 	// We have to draw 9 rects, with the center scaling the texture.
 	const int xMove = pX + ((ninePinch->mScalable.to.x - ninePinch->mScalable.from.x) * pXScale);
 	const int yMove = pY + ((ninePinch->mScalable.to.y - ninePinch->mScalable.from.y) * pYScale);
-	Vec2Ds* verts = mWorkBuffers->vec2Ds.Restart(16);
+	Vert2Ds* verts = mWorkBuffers->vertices2DShort.Restart(16);
 	for( int y = 0 ; y < 4 ; y++ )
 	{
 		for( int x = 0 ; x < 4 ; x++, verts++ )
@@ -1754,7 +1844,7 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 		10,11,15,10,15,14		
 	};
 
-	VertexPtr(2,GL_SHORT,mWorkBuffers->vec2Ds.Data());
+	VertexPtr(2,GL_SHORT,mWorkBuffers->vertices2DShort.Data());
 	glDrawElements(GL_TRIANGLES,9*6,GL_UNSIGNED_BYTE,indices);
 	CHECK_OGL_ERRORS();
 
@@ -1768,13 +1858,13 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 void GLES::FontPrint(int pX,int pY,const char* pText)
 {
 	const std::string_view s(pText);
-	mWorkBuffers->vec2Ds.Restart();
+	mWorkBuffers->vertices2DShort.Restart();
 	mWorkBuffers->uvShort.Restart();
 
 	// Get where the uvs will be written too.
 	const int quadSize = 16 * mPixelFont.scale;
 	const int squishHack = 3 * mPixelFont.scale;
-	mWorkBuffers->vec2Ds.BuildQuads(pX,pY,quadSize,quadSize,s.size(),quadSize - squishHack,0);
+	mWorkBuffers->vertices2DShort.BuildQuads(pX,pY,quadSize,quadSize,s.size(),quadSize - squishHack,0);
 
 	// Get where the uvs will be written too.
 	const int maxUV = 32767;
@@ -1787,12 +1877,12 @@ void GLES::FontPrint(int pX,int pY,const char* pText)
 	}
 
 	// Continue adding uvs to the buffer after the verts.
-	EnableShader(mShaders.TextureAlphaOnly);
+	EnableShader(mShaders.TextureAlphaOnly2D);
 	mShaders.CurrentShader->SetTexture(mPixelFont.texture);
 	mShaders.CurrentShader->SetGlobalColour(mPixelFont.R,mPixelFont.G,mPixelFont.B,mPixelFont.A);
 
 	// how many?
-	const int numVerts = mWorkBuffers->vec2Ds.Used();
+	const int numVerts = mWorkBuffers->vertices2DShort.Used();
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TEXCOORD,
@@ -1802,7 +1892,7 @@ void GLES::FontPrint(int pX,int pY,const char* pText)
 				4,mWorkBuffers->uvShort.Data());
 	CHECK_OGL_ERRORS();
 
-	VertexPtr(2,GL_SHORT,mWorkBuffers->vec2Ds.Data());
+	VertexPtr(2,GL_SHORT,mWorkBuffers->vertices2DShort.Data());
 	CHECK_OGL_ERRORS();
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
 	CHECK_OGL_ERRORS();
@@ -1900,7 +1990,7 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 {
 	auto& font = mFreeTypeFonts.at(pFont);
 
-	mWorkBuffers->vec2Ds.Restart();
+	mWorkBuffers->vertices2DShort.Restart();
 	mWorkBuffers->uvShort.Restart();
 
 	// Get where the uvs will be written too.
@@ -1910,7 +2000,7 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 		{
 			auto&g = font->mGlyphs.at(c-32);
 
-			mWorkBuffers->vec2Ds.BuildQuad(pX + g.x_off,pY + g.y_off,g.width,g.height);
+			mWorkBuffers->vertices2DShort.BuildQuad(pX + g.x_off,pY + g.y_off,g.width,g.height);
 
 			mWorkBuffers->uvShort.AddUVRect(
 					g.uv[0].x,
@@ -1927,12 +2017,12 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 	}
 
 	assert(font->mTexture);
-	EnableShader(mShaders.TextureAlphaOnly);
+	EnableShader(mShaders.TextureAlphaOnly2D);
 	mShaders.CurrentShader->SetTexture(font->mTexture);
 	mShaders.CurrentShader->SetGlobalColour(font->mColour.R,font->mColour.G,font->mColour.B,font->mColour.A);
 
 	// how many?
-	const int numVerts = mWorkBuffers->vec2Ds.Used();
+	const int numVerts = mWorkBuffers->vertices2DShort.Used();
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::TEXCOORD,
@@ -1941,7 +2031,7 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 				GL_TRUE,
 				4,mWorkBuffers->uvShort.Data());
 
-	VertexPtr(2,GL_SHORT,mWorkBuffers->vec2Ds.Data());
+	VertexPtr(2,GL_SHORT,mWorkBuffers->vertices2DShort.Data());
 	glDrawArrays(GL_TRIANGLES,0,numVerts);
 	CHECK_OGL_ERRORS();
 }
@@ -2080,7 +2170,7 @@ void GLES::SetRenderingDefaults()
 
 void GLES::BuildShaders()
 {
-	const char* ColourOnly_VS = R"(
+	const char* ColourOnly2D_VS = R"(
 		uniform mat4 u_proj_cam;
 		uniform vec4 u_global_colour;
 		attribute vec4 a_xyz;
@@ -2092,7 +2182,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	const char *ColourOnly_PS = R"(
+	const char *ColourOnly2D_PS = R"(
 		varying vec4 v_col;
 		void main(void)
 		{
@@ -2100,9 +2190,9 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.ColourOnly = std::make_unique<GLShader>("ColourOnly",ColourOnly_VS,ColourOnly_PS);
+	mShaders.ColourOnly2D = std::make_unique<GLShader>("ColourOnly2D",ColourOnly2D_VS,ColourOnly2D_PS);
 
-	const char* TextureColour_VS = R"(
+	const char* TextureColour2D_VS = R"(
 		uniform mat4 u_proj_cam;
 		uniform vec4 u_global_colour;
 		attribute vec4 a_xyz;
@@ -2117,7 +2207,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	const char *TextureColour_PS = R"(
+	const char *TextureColour2D_PS = R"(
 		varying vec4 v_col;
 		varying vec2 v_tex0;
 		uniform sampler2D u_tex0;
@@ -2127,9 +2217,9 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.TextureColour = std::make_unique<GLShader>("TextureColour",TextureColour_VS,TextureColour_PS);
+	mShaders.TextureColour2D = std::make_unique<GLShader>("TextureColour2D",TextureColour2D_VS,TextureColour2D_PS);
 
-	const char* TextureAlphaOnly_VS = R"(
+	const char* TextureAlphaOnly2D_VS = R"(
 		uniform mat4 u_proj_cam;
 		uniform vec4 u_global_colour;
 		attribute vec4 a_xyz;
@@ -2144,7 +2234,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	const char *TextureAlphaOnly_PS = R"(
+	const char *TextureAlphaOnly2D_PS = R"(
 		varying vec4 v_col;
 		varying vec2 v_tex0;
 		uniform sampler2D u_tex0;
@@ -2154,9 +2244,9 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.TextureAlphaOnly = std::make_unique<GLShader>("TextureAlphaOnly",TextureAlphaOnly_VS,TextureAlphaOnly_PS);
+	mShaders.TextureAlphaOnly2D = std::make_unique<GLShader>("TextureAlphaOnly2D",TextureAlphaOnly2D_VS,TextureAlphaOnly2D_PS);
 	
-	const char* SpriteShader_VS = R"(
+	const char* SpriteShader2D_VS = R"(
 		uniform mat4 u_proj_cam;
 		uniform mat4 u_trans;
 		uniform vec4 u_global_colour;
@@ -2172,7 +2262,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	const char *SpriteShader_PS = R"(
+	const char *SpriteShader2D_PS = R"(
 		varying vec4 v_col;
 		varying vec2 v_tex0;
 		uniform sampler2D u_tex0;
@@ -2182,9 +2272,9 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.SpriteShader = std::make_unique<GLShader>("SpriteShader",SpriteShader_VS,SpriteShader_PS);
+	mShaders.SpriteShader2D = std::make_unique<GLShader>("SpriteShader2D",SpriteShader2D_VS,SpriteShader2D_PS);
 
-	const char* QuadBatchShader_VS = R"(
+	const char* QuadBatchShader2D_VS = R"(
 		uniform mat4 u_proj_cam;
 		uniform vec4 u_global_colour;
 		attribute vec4 a_xyz;
@@ -2225,7 +2315,7 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	const char *QuadBatchShader_PS = R"(
+	const char *QuadBatchShader2D_PS = R"(
 		varying vec4 v_col;
 		varying vec2 v_tex0;
 		uniform sampler2D u_tex0;
@@ -2235,25 +2325,50 @@ void GLES::BuildShaders()
 		}
 	)";
 
-	mShaders.QuadBatchShader = std::make_unique<GLShader>("QuadBatchShader",QuadBatchShader_VS,QuadBatchShader_PS);
+	mShaders.QuadBatchShader2D = std::make_unique<GLShader>("QuadBatchShader2D",QuadBatchShader2D_VS,QuadBatchShader2D_PS);
+
+
+	const char* ColourOnly3D_VS = R"(
+		uniform mat4 u_proj_cam;
+		uniform mat4 u_trans;
+		uniform vec4 u_global_colour;		
+		attribute vec4 a_xyz;
+		attribute vec4 a_col;
+		varying vec4 v_col;
+		void main(void)
+		{
+			v_col = u_global_colour * a_col;
+			gl_Position = u_proj_cam * (u_trans * a_xyz);
+		}
+	)";
+
+	const char *ColourOnly3D_PS = R"(
+		varying vec4 v_col;
+		void main(void)
+		{
+			gl_FragColor = v_col;
+		}
+	)";
+
+	mShaders.ColourOnly3D = std::make_unique<GLShader>("ColourOnly3D",ColourOnly3D_VS,ColourOnly3D_PS);	
 }
 
 void GLES::SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
 {
-	assert(mShaders.TextureAlphaOnly);
-	assert(mShaders.TextureColour);
-	assert(mShaders.ColourOnly);
+	assert(mShaders.TextureAlphaOnly2D);
+	assert(mShaders.TextureColour2D);
+	assert(mShaders.ColourOnly2D);
 
-	TinyShader aShader = mShaders.ColourOnly;
+	TinyShader aShader = mShaders.ColourOnly2D;
 	if( pTexture > 0 )
 	{
 		if( mTextures.at(pTexture)->mFormat == TextureFormat::FORMAT_ALPHA )
 		{
-			aShader = mShaders.TextureAlphaOnly;
+			aShader = mShaders.TextureAlphaOnly2D;
 		}
 		else
 		{
-			aShader = mShaders.TextureColour;
+			aShader = mShaders.TextureColour2D;
 		}
 	}
 
@@ -2270,11 +2385,9 @@ void GLES::EnableShader(TinyShader pShader)
 	assert( pShader );
 	if( mShaders.CurrentShader != pShader )
 	{
-		VERBOSE_SHADER_MESSAGE("Enabling shader " << pShader->mName << " in frame " << mDiagnostics.frameNumber );
 		mShaders.CurrentShader = pShader;
 		pShader->Enable(mMatrices.projection);
 		pShader->SetTransform(mMatrices.transform);
-		CHECK_OGL_ERRORS();
 	}
 }
 
@@ -2479,7 +2592,8 @@ void GLES::CtrlHandler(int SigNum)
 GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFragment) :
 	mName(pName),
 	mEnableStreamUV(strstr(pVertex," a_uv0;")),
-	mEnableStreamTrans(strstr(pVertex," a_trans;"))
+	mEnableStreamTrans(strstr(pVertex," a_trans;")),
+	mEnableStreamColour(strstr(pVertex," a_col;"))
 {
 	VERBOSE_SHADER_MESSAGE("Creating " << mName);
 
@@ -2500,7 +2614,7 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 	//Has to be done before linking.
 	BindAttribLocation((int)StreamIndex::VERTEX, "a_xyz");
 	BindAttribLocation((int)StreamIndex::TEXCOORD, "a_uv0");
-//	BindAttribLocation((int)StreamIndex::COLOUR, "a_col");
+	BindAttribLocation((int)StreamIndex::COLOUR, "a_col");
 	BindAttribLocation((int)StreamIndex::TRANSFORM, "a_trans");
 
 	glLinkProgram(mShader); // creates OpenGL program executables
@@ -2540,6 +2654,9 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 
 
 	glUseProgram(0);
+#ifdef VERBOSE_SHADER_BUILD
+	gCurrentShaderName = "";
+#endif
 }
 
 GLShader::~GLShader()
@@ -2582,7 +2699,10 @@ void GLShader::BindAttribLocation(int location,const char* pName)
 
 void GLShader::Enable(const float projInvcam[4][4])
 {
-	VERBOSE_SHADER_MESSAGE(mName << " Enabling shader " << mShader );
+#ifdef VERBOSE_SHADER_BUILD
+	gCurrentShaderName = mName;
+#endif
+
 	assert(mShader);
     glUseProgram(mShader);
     CHECK_OGL_ERRORS();
@@ -2607,6 +2727,16 @@ void GLShader::Enable(const float projInvcam[4][4])
 	{
 		glDisableVertexAttribArray((int)StreamIndex::TRANSFORM);
 	}
+
+	if( mEnableStreamColour )
+	{
+		glEnableVertexAttribArray((int)StreamIndex::COLOUR);
+	}
+	else
+	{
+		glDisableVertexAttribArray((int)StreamIndex::COLOUR);
+	}
+	
 
 
     CHECK_OGL_ERRORS();
@@ -2698,6 +2828,16 @@ void ReadOGLErrors(const char *pSource_file_name,int pLine_number)
 		return;
 	}
 
+#ifdef VERBOSE_SHADER_BUILD
+	if( gCurrentShaderName.size() )
+	{
+		VERBOSE_SHADER_MESSAGE("Current shader: " << gCurrentShaderName );
+	}
+	else
+	{
+		VERBOSE_SHADER_MESSAGE("No shader selected: " << gCurrentShaderName );
+	}
+#endif
 	std:: cerr << "\n**********************\nline " << pLine_number << " file " << pSource_file_name << "\n";
 	while(gl_error_code != GL_NO_ERROR)
 	{

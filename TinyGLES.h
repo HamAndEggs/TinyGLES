@@ -90,6 +90,41 @@ constexpr float ColourToFloat(uint8_t pColour)
 	return (float)pColour / 255.0f;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Some basic matrix operations. Very basic, will get you by...
+struct Matrix
+{
+	float m[4][4];
+
+	void SetIdentity();
+	void SetTranslation(float pX,float pY,float pZ);// Sets as identity with translation set to x,y,z.
+	void SetRotationX(float pPitch);	// In angles. 0 -> 360.0f
+	void SetRotationY(float pYaw);		// In angles. 0 -> 360.0f
+	void SetRotationZ(float pRoll);		// In angles. 0 -> 360.0f
+
+	void Translate(float pX,float pY,float pZ)// Does not change anything byt the translation.
+	{
+		m[3][0] = pX;
+		m[3][1] = pY;
+		m[3][2] = pZ;
+	}
+
+	void Mul(const Matrix &pA,const Matrix &pB);	// Does this = pA * pB
+	void Mul(const Matrix &pA)						// Does this = this * pA
+	{
+		Matrix t;
+		t.Mul(*this,pA);
+		*this = t;
+	}
+
+	const Matrix operator = (const Matrix &pIn)
+	{
+		memcpy(m,pIn.m,sizeof(m));
+		return *this;
+	}
+};
+
+
 /**
  * @brief The different type of events that the application can respond to.
  * See setSystemEventHandler function in GLES class.
@@ -203,6 +238,17 @@ struct NinePatchDrawInfo
 		}top,bottom;
 	}outerRectangle,innerRectangle; // outerRectangle is it's total rendered area. innerRectangle is where you may safely draw over the nine patch. 
 };
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Render primitive types for rendering user defined shapes.
+
+// Basic 3D vertex with x,y,z and 32bit colour value.
+struct VertXYZC
+{
+	float x,y,z;
+    uint32_t argb;
+};
+typedef std::vector<VertXYZC> VerticesXYZC;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
@@ -410,6 +456,11 @@ public:
 	 */
 	std::vector<QuadBatchTransform>& QuadBatchGetTransform(uint32_t pQuadBatch);
 
+
+//*******************************************
+// Primitive rendering functions for user defined shapes
+	void RenderTriangles(const VerticesXYZC& pVertices);
+
 //*******************************************
 // Texture functions
 	/**
@@ -615,11 +666,13 @@ private:
 
 	struct
 	{
-		TinyShader ColourOnly;
-		TinyShader TextureColour;
-		TinyShader TextureAlphaOnly;
-		TinyShader SpriteShader;
-		TinyShader QuadBatchShader;
+		TinyShader ColourOnly2D;
+		TinyShader TextureColour2D;
+		TinyShader TextureAlphaOnly2D;
+		TinyShader SpriteShader2D;
+		TinyShader QuadBatchShader2D;
+
+		TinyShader ColourOnly3D;
 
 		TinyShader CurrentShader;
 	}mShaders;
