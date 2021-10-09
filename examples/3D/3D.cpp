@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
 	Set(aBox,verts,1,   5,4,7,6,    0xff00ff00);//Back
 	Set(aBox,verts,2,   1,5,6,2,    0xff0000ff);//right
 	Set(aBox,verts,3,   4,0,3,7,    0xffff00ff);//left
-	Set(aBox,verts,4,   0,4,5,1,    0xffffffff);//top
+	Set(aBox,verts,4,   0,4,5,1,    0xffffff00);//top
 	Set(aBox,verts,5,   3,2,6,7,    0xff00ffff);//bottom
 
     int anim = 0;
@@ -65,21 +65,32 @@ int main(int argc, char *argv[])
         anim++;
         GL.Clear(100,100,100);
 
-        GL.SetFrustum2D();
+        GL.Begin2D();
 
         GL.FontPrint(0,0,"3D Basic Example");
 
-        GL.SetFrustum3D(60.0f,GL.GetDisplayAspectRatio(),0.1f,100.0f);
+        GL.Begin3D(45.0f,0.1f,100.0f);
 
         r.SetRotationX(anim);
         t.SetRotationY(anim*2.7f);
         r.Mul(t);
         t.SetRotationZ(anim*3.11f);
         r.Mul(t);
-        r.Translate(0,0,2);
 
+        r.Translate(0,0,5);
         GL.SetTransform(r.m);
+        GL.RenderTriangles(aBox);
 
+        r.Translate(0,-1,5);
+        GL.SetTransform(r.m);
+        GL.RenderTriangles(aBox);
+
+        r.Translate(0,-2,5);
+        GL.SetTransform(r.m);
+        GL.RenderTriangles(aBox);
+
+        r.Translate(1,-2,5);
+        GL.SetTransform(r.m);
         GL.RenderTriangles(aBox);
 
         GL.EndFrame();

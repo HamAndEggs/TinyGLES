@@ -314,14 +314,15 @@ public:
 	void Clear(uint32_t pTexture);
 
 	/**
-	 * @brief Set the Frustum for 2D rending. This is the default mode, you only need to call it if you're mixed 3D with 2D.
+	 * @brief Set rendering states and the Frustum for 2D rending.
+	 * This is the default mode, you only need to call it if you mixed 3D with 2D.
 	 */
-	void SetFrustum2D();
+	void Begin2D();
 
 	/**
-	 * @brief Set the view frustum for 3D rendering
+	 * @brief Sets rendering states and the view frustum for 3D rendering
 	 */
-	void SetFrustum3D(float pFov, float pAspect, float pNear, float pFar);
+	void Begin3D(float pFov, float pNear, float pFar);
 
 	void SetTransform(float transform[4][4]);
 	void SetTransform(float x,float y,float z);
@@ -592,9 +593,6 @@ private:
 	void AllocateQuadBuffers();
 
 	void VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer);
-	void TexCoordPtr(int pNum_coord, uint32_t pType,const void* pPointer);
-	void ColourPtr(int pNum_coord,const uint8_t* pPointer);
-	void SetUserSpaceStreamPtr(uint32_t pStream,int pNum_coord, uint32_t pType,const void* pPointer);
 
 	uint32_t mCreateFlags;
 	bool mKeepGoing = true;								//!< Set to false by the application requesting to exit or the user doing ctrl + c.

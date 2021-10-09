@@ -983,8 +983,9 @@ void GLES::Clear(uint32_t pTexture)
 	FillRectangle(0,0,GetWidth(),GetHeight(),pTexture);
 }
 
-void GLES::SetFrustum2D()
+void GLES::Begin2D()
 {
+	// Setup 2D frustum
 	memset(mMatrices.projection,0,sizeof(mMatrices.projection));
 	mMatrices.projection[3][3] = 1;
 
@@ -1019,32 +1020,58 @@ void GLES::SetFrustum2D()
 		mMatrices.projection[3][0] = -1;
 		mMatrices.projection[3][1] = 1;
 	}
+
+	// No Depth buffer in 2D
+	glDisable(GL_DEPTH_TEST);
+	glDepthFunc(GL_ALWAYS);
+	glDepthMask(false);
+
 }
 
-void GLES::SetFrustum3D(float pFov, float pAspect, float pNear, float pFar)
+void GLES::Begin3D(float pFov, float pNear, float pFar)
 {
-	float cotangent = 1.0f / tanf(DegreeToRadian(pFov));
-	float q = pFar / (pFar - pNear);
+	const float cotangent = 1.0f / tanf(DegreeToRadian(pFov));
+	const float q = pFar / (pFar - pNear);
+	const float aspect = GetDisplayAspectRatio();
+
+	memset(mMatrices.projection,0,sizeof(mMatrices.projection));
 
 	mMatrices.projection[0][0] = cotangent;
-	mMatrices.projection[0][1] = 0.0f;
-	mMatrices.projection[0][2] = 0.0f;
-	mMatrices.projection[0][3] = 0.0f;
 
-	mMatrices.projection[1][0] = 0.0f;
-	mMatrices.projection[1][1] = pAspect * cotangent;
-	mMatrices.projection[1][2] = 0.0f;
-	mMatrices.projection[1][3] = 0.0f;
+	mMatrices.projection[1][1] = aspect * cotangent;
 
-	mMatrices.projection[2][0] = 0.0f;
-	mMatrices.projection[2][1] = 0.0f;
 	mMatrices.projection[2][2] = q;
 	mMatrices.projection[2][3] = 1.0f;
 
-	mMatrices.projection[3][0] = 0.0f;
-	mMatrices.projection[3][1] = 0.0f;
 	mMatrices.projection[3][2] = -q * pNear;
-	mMatrices.projection[3][3] = 0.0f;
+
+	if( mCreateFlags&ROTATE_FRAME_BUFFER_90 )
+	{
+		mMatrices.projection[0][1] = -mMatrices.projection[0][0];
+		mMatrices.projection[0][0] = 0.0f;
+
+		mMatrices.projection[1][0] = mMatrices.projection[1][1];
+		mMatrices.projection[1][1] = 0.0f;
+	}
+	else if( mCreateFlags&ROTATE_FRAME_BUFFER_180 )
+	{
+		mMatrices.projection[0][0] = -mMatrices.projection[0][0];
+		mMatrices.projection[1][1] = -mMatrices.projection[1][1];
+	}
+	else if( mCreateFlags&ROTATE_FRAME_BUFFER_270 )
+	{
+		mMatrices.projection[0][1] = mMatrices.projection[0][0];
+		mMatrices.projection[0][0] = 0.0f;
+
+		mMatrices.projection[1][0] = -mMatrices.projection[1][1];
+		mMatrices.projection[1][1] = 0.0f;
+	}
+
+	// Depth buffer please
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
+	glDepthMask(GL_TRUE);
+
 }
 
 void GLES::SetTransform(float pTransform[4][4])
@@ -1120,7 +1147,7 @@ void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGr
 	Vert2Df* verts = mWorkBuffers->vertices2Df.Restart(pNumPoints);
 
 	float rad = 0.0;
-	const float step = GetRadian() / (float)(pNumPoints-2);//+2 is because of first triangle.
+	const float step = GetRadian() / (float)(pNumPoints-2);// +2 is because of first triangle.
 	const float r = (float)pRadius;
 	const float x = (float)pCenterX;
 	const float y = (float)pCenterY;
@@ -1147,7 +1174,13 @@ void GLES::Rectangle(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_
 
 	if( mShaders.CurrentShader->GetUsesTexture() )
 	{
-		TexCoordPtr(2,GL_SHORT,uv);
+		glVertexAttribPointer(
+					(GLuint)StreamIndex::TEXCOORD,
+					2,
+					GL_SHORT,
+					GL_FALSE,
+					0,uv);
+		CHECK_OGL_ERRORS();
 	}
 
 	VertexPtr(2,GL_SHORT,quad);
@@ -1464,8 +1497,6 @@ std::vector<QuadBatchTransform>& GLES::QuadBatchGetTransform(uint32_t pQuadBatch
 // Primitive rendering functions for user defined shapes
 void GLES::RenderTriangles(const VerticesXYZC& pVertices)
 {
-		glDisable(GL_CULL_FACE);
-
 	EnableShader(mShaders.ColourOnly3D);
 
 	assert(mShaders.CurrentShader);
@@ -1481,16 +1512,16 @@ void GLES::RenderTriangles(const VerticesXYZC& pVertices)
 				GL_FALSE,
 				sizeof(VertXYZC),
 				verts);
+	CHECK_OGL_ERRORS();
 
 	glVertexAttribPointer(
 				(GLuint)StreamIndex::COLOUR,
 				4,
-				GL_BYTE,
+				GL_UNSIGNED_BYTE,
 				GL_TRUE,
 				sizeof(VertXYZC),
 				c);
-
-	
+	CHECK_OGL_ERRORS();
 
 	glDrawArrays(GL_TRIANGLES,0,pVertices.size());
 	CHECK_OGL_ERRORS();
@@ -2148,11 +2179,7 @@ void GLES::SetRenderingDefaults()
 	glViewport(0, 0, (GLsizei)mPhysical.Width, (GLsizei)mPhysical.Height);
 	glDepthRangef(0.0f,1.0f);
 	glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-	SetFrustum2D();
-
-	glDisable(GL_DEPTH_TEST);
-	glDepthFunc(GL_ALWAYS);
-	glDepthMask(false);
+	Begin2D();
 
 	// Always cull, because why not. :) Make code paths simple.
 	glEnable(GL_CULL_FACE);
@@ -2528,39 +2555,14 @@ void GLES::VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer)
 		THROW_MEANINGFUL_EXCEPTION("VertexPtr passed invalid value for pNum_coord, must be 2 or 3 got " + std::to_string(pNum_coord));
 	}
 
-	return SetUserSpaceStreamPtr((GLuint)StreamIndex::VERTEX,pNum_coord,pType,pPointer);
-}
-
-void GLES::TexCoordPtr(int pNum_coord, uint32_t pType,const void* pPointer)
-{
-	return SetUserSpaceStreamPtr((GLuint)StreamIndex::TEXCOORD,pNum_coord,pType,pPointer);
-}
-
-void GLES::ColourPtr(int pNum_coord,const uint8_t* pPointer)
-{
-	if(pNum_coord < 3 || pNum_coord > 4)
-	{
-		THROW_MEANINGFUL_EXCEPTION("ColourPtr passed invalid value for pNum_coord, must be 3 or 4 got " + std::to_string(pNum_coord));
-	}
-
-	return SetUserSpaceStreamPtr((GLuint)StreamIndex::COLOUR,pNum_coord,GL_BYTE,pPointer);
-}
-
-void GLES::SetUserSpaceStreamPtr(uint32_t pStream,GLint pNum_coord, uint32_t pType,const void* pPointer)
-{
-
-	if( pStream != (GLuint)StreamIndex::VERTEX && pStream != (GLuint)StreamIndex::TEXCOORD && pStream != (GLuint)StreamIndex::COLOUR  )
-	{
-		THROW_MEANINGFUL_EXCEPTION("SetUserSpaceStreamPtr passed invlaid stream index " + std::to_string((int)pStream));
-	}
-
 	glVertexAttribPointer(
-				(GLuint)pStream,
+				(GLuint)StreamIndex::VERTEX,
 				pNum_coord,
 				pType,
 				pType == GL_BYTE,
 				0,pPointer);
 	CHECK_OGL_ERRORS();
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2595,9 +2597,10 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 	mEnableStreamTrans(strstr(pVertex," a_trans;")),
 	mEnableStreamColour(strstr(pVertex," a_col;"))
 {
-	VERBOSE_SHADER_MESSAGE("Creating " << mName);
+	VERBOSE_SHADER_MESSAGE("Creating " << mName << " mEnableStreamUV " << mEnableStreamUV << " mEnableStreamTrans" << mEnableStreamTrans << " mEnableStreamColour" << mEnableStreamColour);
 
 	mVertexShader = LoadShader(GL_VERTEX_SHADER,pVertex);
+
 	mFragmentShader = LoadShader(GL_FRAGMENT_SHADER,pFragment);
 
 	VERBOSE_SHADER_MESSAGE("vertex("<<mVertexShader<<") fragment("<<mFragmentShader<<")");
@@ -2610,6 +2613,7 @@ GLShader::GLShader(const std::string& pName,const char* pVertex, const char* pFr
 
 	glAttachShader(mShader, mFragmentShader); // add the fragment shader to program
 	CHECK_OGL_ERRORS();
+
 	//Set the input stream numbers.
 	//Has to be done before linking.
 	BindAttribLocation((int)StreamIndex::VERTEX, "a_xyz");
