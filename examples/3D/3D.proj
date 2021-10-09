@@ -1,6 +1,7 @@
 {
     "source_files": [
         "3D.cpp",
+        "../SupportCode/TinyPNG.cpp",
         "../../TinyGLES.cpp"
     ],
     "configurations":
@@ -22,7 +23,8 @@
                 "m",
                 "brcmGLESv2",
                 "brcmEGL",
-                "bcm_host"
+                "bcm_host",
+                "z"
             ],
             "libpaths":
             [
@@ -53,7 +55,8 @@
                 "GLESv2",
                 "EGL",
                 "gbm",
-                "drm"
+                "drm",
+                "z"
             ],
             "define": [
                 "DEBUG_BUILD",
@@ -80,7 +83,8 @@
                 "pthread",
                 "m",
                 "GL",
-                "X11"
+                "X11",
+                "z"
             ],
             "define": [
                 "DEBUG_BUILD",

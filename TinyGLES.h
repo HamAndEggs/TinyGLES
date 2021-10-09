@@ -250,12 +250,32 @@ struct VertXYZC
 };
 typedef std::vector<VertXYZC> VerticesXYZC;
 
+// Basic 3D vertex with x,y,z and 16bit texture coords that are normalised. So 0x7fff is 1.0f. Used the texture coordinate scale option to get tiling. When I put that in...
+struct VertXYZUV
+{
+	float x,y,z;
+    int16_t u,v;
+
+	void SetUV(float pU,float pV)
+	{
+		const float SCALE = (float)0x7fff;
+
+		assert( pU >= -1.0f && pU <= 1.0f );
+		assert( pV >= -1.0f && pV <= 1.0f );
+
+		u = (int16_t)(pU * SCALE);
+		v = (int16_t)(pV * SCALE);
+	}
+
+};
+typedef std::vector<VertXYZUV> VerticesXYZUV;
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
- * @brief Represents the linux frame buffer display.
+ * @brief Represents the linux GLES display.
  * Is able to deal with and abstract out the various pixel formats. 
- * For a simple 2D rendering system that's built for portablity that is an easy speed up.
- * Tiny2D goal is portablity and small code base. Not and epic SIMD / NEON / GL / DX / Volcan monster. :)
+ * For a simple 2D / 3D rendering system that's built for portablity that is an easy speed up.
+ * TinyGLES goal is a small code base just for playing with. One source file one header. Not and epic SIMD / NEON / GL / DX / Volcan monster engine. :)
  */
 class GLES
 {
@@ -461,6 +481,7 @@ public:
 //*******************************************
 // Primitive rendering functions for user defined shapes
 	void RenderTriangles(const VerticesXYZC& pVertices);
+	void RenderTriangles(const VerticesXYZUV& pVertices,uint32_t pTexture);
 
 //*******************************************
 // Texture functions
@@ -671,6 +692,7 @@ private:
 		TinyShader QuadBatchShader2D;
 
 		TinyShader ColourOnly3D;
+		TinyShader TextureOnly3D;
 
 		TinyShader CurrentShader;
 	}mShaders;
