@@ -90,6 +90,41 @@ constexpr float ColourToFloat(uint8_t pColour)
 	return (float)pColour / 255.0f;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Some basic matrix operations. Very basic, will get you by...
+struct Matrix
+{
+	float m[4][4];
+
+	void SetIdentity();
+	void SetTranslation(float pX,float pY,float pZ);// Sets as identity with translation set to x,y,z.
+	void SetRotationX(float pPitch);	// In angles. 0 -> 360.0f
+	void SetRotationY(float pYaw);		// In angles. 0 -> 360.0f
+	void SetRotationZ(float pRoll);		// In angles. 0 -> 360.0f
+
+	void Translate(float pX,float pY,float pZ)// Does not change anything byt the translation.
+	{
+		m[3][0] = pX;
+		m[3][1] = pY;
+		m[3][2] = pZ;
+	}
+
+	void Mul(const Matrix &pA,const Matrix &pB);	// Does this = pA * pB
+	void Mul(const Matrix &pA)						// Does this = this * pA
+	{
+		Matrix t;
+		t.Mul(*this,pA);
+		*this = t;
+	}
+
+	const Matrix operator = (const Matrix &pIn)
+	{
+		memcpy(m,pIn.m,sizeof(m));
+		return *this;
+	}
+};
+
+
 /**
  * @brief The different type of events that the application can respond to.
  * See setSystemEventHandler function in GLES class.
@@ -205,6 +240,17 @@ struct NinePatchDrawInfo
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Render primitive types for rendering user defined shapes.
+
+// Basic 3D vertex with x,y,z and 32bit colour value.
+struct VertXYZC
+{
+	float x,y,z;
+    uint32_t argb;
+};
+typedef std::vector<VertXYZC> VerticesXYZC;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
  * @brief Represents the linux frame buffer display.
  * Is able to deal with and abstract out the various pixel formats. 
@@ -268,14 +314,15 @@ public:
 	void Clear(uint32_t pTexture);
 
 	/**
-	 * @brief Set the Frustum for 2D rending. This is the default mode, you only need to call it if you're mixed 3D with 2D.
+	 * @brief Set rendering states and the Frustum for 2D rending.
+	 * This is the default mode, you only need to call it if you mixed 3D with 2D.
 	 */
-	void SetFrustum2D();
+	void Begin2D();
 
 	/**
-	 * @brief Set the view frustum for 3D rendering
+	 * @brief Sets rendering states and the view frustum for 3D rendering
 	 */
-	void SetFrustum3D(float pFov, float pAspect, float pNear, float pFar);
+	void Begin3D(float pFov, float pNear, float pFar);
 
 	void SetTransform(float transform[4][4]);
 	void SetTransform(float x,float y,float z);
@@ -410,6 +457,11 @@ public:
 	 */
 	std::vector<QuadBatchTransform>& QuadBatchGetTransform(uint32_t pQuadBatch);
 
+
+//*******************************************
+// Primitive rendering functions for user defined shapes
+	void RenderTriangles(const VerticesXYZC& pVertices);
+
 //*******************************************
 // Texture functions
 	/**
@@ -541,9 +593,6 @@ private:
 	void AllocateQuadBuffers();
 
 	void VertexPtr(int pNum_coord, uint32_t pType,const void* pPointer);
-	void TexCoordPtr(int pNum_coord, uint32_t pType,const void* pPointer);
-	void ColourPtr(int pNum_coord,const uint8_t* pPointer);
-	void SetUserSpaceStreamPtr(uint32_t pStream,int pNum_coord, uint32_t pType,const void* pPointer);
 
 	uint32_t mCreateFlags;
 	bool mKeepGoing = true;								//!< Set to false by the application requesting to exit or the user doing ctrl + c.
@@ -615,11 +664,13 @@ private:
 
 	struct
 	{
-		TinyShader ColourOnly;
-		TinyShader TextureColour;
-		TinyShader TextureAlphaOnly;
-		TinyShader SpriteShader;
-		TinyShader QuadBatchShader;
+		TinyShader ColourOnly2D;
+		TinyShader TextureColour2D;
+		TinyShader TextureAlphaOnly2D;
+		TinyShader SpriteShader2D;
+		TinyShader QuadBatchShader2D;
+
+		TinyShader ColourOnly3D;
 
 		TinyShader CurrentShader;
 	}mShaders;
