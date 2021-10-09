@@ -927,6 +927,10 @@ GLES::~GLES()
 	mShaders.SpriteShader2D.reset();
 	mShaders.QuadBatchShader2D.reset();
 
+	mShaders.ColourOnly3D.reset();
+	mShaders.TextureOnly3D.reset();
+
+
 	// delete all free type fonts.
 #ifdef USE_FREETYPEFONTS
 	mFreeTypeFonts.clear();
@@ -1520,6 +1524,44 @@ void GLES::RenderTriangles(const VerticesXYZC& pVertices)
 				GL_UNSIGNED_BYTE,
 				GL_TRUE,
 				sizeof(VertXYZC),
+				c);
+	CHECK_OGL_ERRORS();
+
+	glDrawArrays(GL_TRIANGLES,0,pVertices.size());
+	CHECK_OGL_ERRORS();
+}
+
+void GLES::RenderTriangles(const VerticesXYZUV& pVertices,uint32_t pTexture)
+{
+	if(pTexture == 0)
+	{
+		pTexture = mDiagnostics.texture;
+	}
+
+	EnableShader(mShaders.TextureOnly3D);
+
+	assert(mShaders.CurrentShader);
+	mShaders.CurrentShader->SetTexture(pTexture);
+	mShaders.CurrentShader->SetGlobalColour(1.0f,1.0f,1.0f,1.0f);
+
+	const uint8_t* verts = (const uint8_t*)pVertices.data();
+	const uint8_t* c = verts + (sizeof(float)*3);
+
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::VERTEX,
+				3,
+				GL_FLOAT,
+				GL_FALSE,
+				sizeof(VertXYZUV),
+				verts);
+	CHECK_OGL_ERRORS();
+
+	glVertexAttribPointer(
+				(GLuint)StreamIndex::TEXCOORD,
+				2,
+				GL_SHORT,
+				GL_TRUE,
+				sizeof(VertXYZUV),
 				c);
 	CHECK_OGL_ERRORS();
 
@@ -2378,6 +2420,35 @@ void GLES::BuildShaders()
 	)";
 
 	mShaders.ColourOnly3D = std::make_unique<GLShader>("ColourOnly3D",ColourOnly3D_VS,ColourOnly3D_PS);	
+
+	const char* TextureOnly3D_VS = R"(
+		uniform mat4 u_proj_cam;
+		uniform mat4 u_trans;
+		uniform vec4 u_global_colour;		
+		attribute vec4 a_xyz;
+		attribute vec2 a_uv0;
+		varying vec4 v_col;
+		varying vec2 v_tex0;
+		void main(void)
+		{
+			v_col = u_global_colour;
+			v_tex0 = a_uv0;
+			gl_Position = u_proj_cam * (u_trans * a_xyz);
+		}
+	)";
+
+	const char *TextureOnly3D_PS = R"(
+		varying vec4 v_col;
+		varying vec2 v_tex0;
+		uniform sampler2D u_tex0;
+		void main(void)
+		{
+			gl_FragColor = v_col * texture2D(u_tex0,v_tex0);
+		}
+	)";
+
+	mShaders.TextureOnly3D = std::make_unique<GLShader>("TextureOnly3D",TextureOnly3D_VS,TextureOnly3D_PS);	
+
 }
 
 void GLES::SelectAndEnableShader(uint32_t pTexture,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
