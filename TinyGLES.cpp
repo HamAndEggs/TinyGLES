@@ -3609,6 +3609,13 @@ void PlatformInterface::UpdateCurrentBuffer()
 	mCurrentFrontBufferID = *user_data;
 }
 
+static void page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *data)
+{
+	/* suppress 'unused parameter' warnings */
+	(void)fd, (void)frame, (void)sec, (void)usec;
+	*((bool*)data) = 0;	// Set flip flag to false
+}
+
 void PlatformInterface::SwapBuffers()
 {
 	eglSwapBuffers(mDisplay,mSurface);
@@ -3629,11 +3636,36 @@ void PlatformInterface::SwapBuffers()
 		}
 	}
 
-	int ret = drmModePageFlip(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID,DRM_MODE_PAGE_FLIP_ASYNC,NULL);
+	// Using DRM_MODE_PAGE_FLIP_EVENT as some devices don't support DRM_MODE_PAGE_FLIP_ASYNC.
+	bool waiting_for_flip = 1;
+	int ret = drmModePageFlip(mDRMFile, mModeEncoder->crtc_id, mCurrentFrontBufferID,DRM_MODE_PAGE_FLIP_EVENT,&waiting_for_flip);
 	if (ret)
 	{
-		THROW_MEANINGFUL_EXCEPTION("drmModePageFlip failed to queue page flip");
+		THROW_MEANINGFUL_EXCEPTION("drmModePageFlip failed to queue page flip " + std::string(strerror(errno)) );
 	}
+
+	while (waiting_for_flip)
+	{
+		drmEventContext evctx =
+		{
+			.version = 2,
+			.page_flip_handler = page_flip_handler,
+		};
+
+		fd_set fds;
+		FD_ZERO(&fds);
+		FD_SET(0, &fds);
+		FD_SET(mDRMFile, &fds);
+
+		ret = select(mDRMFile + 1, &fds, NULL, NULL, NULL);
+		if (ret < 0)
+		{
+			THROW_MEANINGFUL_EXCEPTION("PlatformInterface::SwapBuffer select on DRM file failed to queue page flip " + std::string(strerror(errno)));
+		}
+
+		drmHandleEvent(mDRMFile, &evctx);
+	}
+
 	gbm_surface_release_buffer(mNativeWindow,mCurrentFrontBufferObject);
 }
 
