@@ -3,6 +3,22 @@
 
 #include <iostream>
 
+static void FillPoints(tinygles::VerticesShortXY& rPoints,int pCX,int pCY,float pAngle,const float pSize,const int pNumLines)
+{
+    const float angleStep = tinygles::DegreeToRadian(360.0f) / pNumLines;
+
+    // Make the six points for the hexagon
+    for( int n = 0 ; n < pNumLines ; n++, pAngle += angleStep )
+    {
+        rPoints.emplace_back(
+            pCX + ((int)(std::cos(pAngle) * pSize)),
+            pCY + ((int)(std::sin(pAngle) * pSize))
+        );
+    }
+    rPoints.emplace_back(rPoints[0]);// Close the loop.
+}
+
+
 int main(int argc, char *argv[])
 {
 // Say hello to the world!
@@ -13,20 +29,32 @@ int main(int argc, char *argv[])
     std::cout << "Build date and time " << APP_BUILD_DATE_TIME << '\n';
     std::cout << "Build date " << APP_BUILD_DATE << '\n';
     std::cout << "Build time " << APP_BUILD_TIME << '\n';
+#ifdef DEBUG_BUILD
+    std::cout << "Debug build #define DEBUG_BUILD \n";
+#endif
 
     tinygles::GLES GL;
 
     std::cout << "Main loop\b";
     int anim = 0;
+   	float rot = 0.0f;
     while( GL.BeginFrame() )
     {
-        anim++;
+		rot += 0.01f;
+		if( rot >= 360.0f )
+		{
+			rot -= 360.0f;
+		}
+
+		anim++;
+        
         GL.Clear(0,0,0);
 
         GL.FillRoundedRectangle(50,50,950,550,100,55,20,155);
         GL.DrawRoundedRectangle(50,50,950,550,100,255,255,255);
 
-        for(int n = 0 ; n < 32 ; n++ )
+        const int primCount = 15;
+        for(int n = 0 ; n < primCount ; n++ )
         {
             int w = 8 + (rand()&127);
             int h = 8 + (rand()&127);
@@ -37,7 +65,7 @@ int main(int argc, char *argv[])
             GL.FillRectangle(x,y,x+w,y+h,rand(),rand(),rand());
         }
 
-        for(int n = 0 ; n < 32 ; n++ )
+        for(int n = 0 ; n < primCount ; n++ )
         {
             int w = 8 + (rand()&127);
             int h = 8 + (rand()&127);
@@ -48,7 +76,7 @@ int main(int argc, char *argv[])
             GL.DrawRectangle(x,y,x+w,y+h,rand(),rand(),rand());
         }
 
-        for(int n = 0 ; n < 32 ; n++ )
+        for(int n = 0 ; n < primCount ; n++ )
         {
             int x1 = rand()%(GL.GetWidth());
             int y1 = rand()%(GL.GetHeight());
@@ -56,13 +84,13 @@ int main(int argc, char *argv[])
             int x2 = rand()%(GL.GetWidth());
             int y2 = rand()%(GL.GetHeight());
 
-            GL.Line(x1,y1,x2,y2,rand(),rand(),rand());
+            GL.DrawLine(x1,y1,x2,y2,rand(),rand(),rand());
         }
 
         GL.FillRectangle(100,100,400,400,255,0,255);
         GL.DrawRectangle(100,100,400,400,0,0,0);
 
-        const int r = 8 + (anim%250);
+        const int r = 8 + std::abs(sin(rot)*100);
         GL.FillCircle(500,200,r,255,255,255);
         GL.DrawCircle(500,200,r,0,0,0);
 
@@ -71,6 +99,92 @@ int main(int argc, char *argv[])
 
         GL.DrawRoundedRectangle(450,450,800,550,20,255,255,255);
         GL.FillRoundedRectangle(450,450,800,550,10,255,255,0,100);
+
+        // Draw a single pixel line list.
+   		{
+			const int x = (GL.GetWidth()*3)/14;
+			const int y = (GL.GetHeight()/2);
+			tinygles::VerticesShortXY points;
+            FillPoints(points,x,y,rot,50.0f,5);
+            GL.DrawLineList(points,255,255,255);
+        }
+
+        // Fat line
+        {
+			const int x = (GL.GetWidth()*10)/14;
+			const int y = (GL.GetHeight()*1)/4;
+
+            float angle = rot;
+            const float angleStep = tinygles::DegreeToRadian(180.0f);
+
+            int sx = x + ((int)(std::cos(angle) * 70.0f));
+            int sy = y + ((int)(std::sin(angle) * 70.0f));
+
+            angle += angleStep;
+
+            int ex = x + ((int)(std::cos(angle) * 70.0f));
+            int ey = y + ((int)(std::sin(angle) * 70.0f));
+
+            GL.DrawLine(sx,sy,ex,ey,11,0,0,0);
+            GL.DrawLine(sx,sy,ex,ey,5,255,255,255);
+
+			tinygles::VerticesShortXY points;
+            FillPoints(points,x,y,rot,90.0f,6);
+
+            GL.DrawLineList(points,11,0,0,0);
+            GL.DrawLineList(points,5,255,255,255);
+
+			tinygles::VerticesShortXY triangle;
+            FillPoints(triangle,x-50,y+50,rot,90.0f,3);
+
+            GL.DrawLineList(triangle,11,0,0,0);
+            GL.DrawLineList(triangle,5,anim * 5,anim * 17,anim * 11);
+        }
+
+		// Draws a test pattern so we can check colour output.
+		{
+			const int x = 20;
+			const int y = 20;
+
+			GL.FillRectangle(x,y,x+460,y+160,0,0,0);
+			GL.FillRectangle(x+10,y+10,x+450,y+150,255,255,255);
+
+			GL.FillRectangle(x+20,y+20,x+140,y+110,255,0,0);
+			GL.FillRectangle(x+170,y+20,x+290,y+110,0,255,0);
+			GL.FillRectangle(x+320,y+20,x+440,y+110,0,0,255);
+
+            GL.FontSetScale(2);
+			GL.FontSetColour(255,0,0);
+			GL.FontPrint(x+20,y+110,"RED");
+
+			GL.FontSetColour(0,255,0);
+			GL.FontPrint(x+170,y+110,"GREEN");
+
+			GL.FontSetColour(0,0,255);
+			GL.FontPrint(x+320,y+110,"BLUE");
+		}
+
+		// Draws some gradients, test colour output.
+		{
+			const int x = 20;
+			const int y = (GL.GetHeight() / 2) + 80;
+
+			GL.FillRectangle(x,y,x+552,y+150,0,0,0);
+			GL.FillRectangle(x+10,y+10,x+542,y+140,255,255,255);
+
+			for(int n = 0 ; n < 256 ; n++ )
+			{
+				const int i = x + 20 + (n*2);
+				GL.DrawLineV(i,y+20,y+50,n,0,0);
+				GL.DrawLineV(i+1,y+20,y+50,n,0,0);
+
+				GL.DrawLineV(i,y+60,y+90,0,n,0);
+				GL.DrawLineV(i+1,y+60,y+90,0,n,0);
+
+				GL.DrawLineV(i,y+100,y+130,0,0,n);
+				GL.DrawLineV(i+1,y+100,y+130,0,0,n);
+			}
+		}
 
         GL.EndFrame();
 

@@ -5,9 +5,84 @@
     ],
     "configurations":
     {
-        "bcm_host-GLES-debug":
+        "debug":
         {
             "default": true,
+            "include":
+            [
+                "../..",
+                "/usr/include/libdrm"
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "GLESv2",
+                "EGL",
+                "gbm",
+                "drm"
+            ],
+            "define": [
+                "PLATFORM_DIRECT_RENDER_MANAGER",
+                "PLATFORM_GLES",
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD"
+            ]
+        },
+        "release":
+        {
+            "default": false,
+            "include":
+            [
+                "../..",
+                "/usr/include/libdrm"
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "GLESv2",
+                "EGL",
+                "gbm",
+                "drm"
+            ],
+            "define": [
+                "PLATFORM_DIRECT_RENDER_MANAGER",
+                "PLATFORM_GLES",
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD"
+            ]
+        },
+        "x11":
+        {
+            "default": false,
+            "enable_all_warnings": true,
+            "standard": "c++17",
+            "optimisation": "0",
+            "debug_level": "2",
+            "include":
+            [
+                "../.."
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "GL",
+                "X11"
+            ],
+            "define": [
+                "DEBUG_BUILD",
+                "PLATFORM_X11_GL",
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD"
+            ]
+        },
+        "bcm_host-GLES-debug":
+        {
             "enable_all_warnings": false,
             "standard": "c++17",
             "include":
@@ -33,60 +108,6 @@
                 "BROADCOM_NATIVE_WINDOW",
                 "PLATFORM_EGL",
                 "PLATFORM_GLES"
-            ]
-        },
-        "DRM-debug":
-        {
-            "default": false,
-            "enable_all_warnings": false,
-            "standard": "c++17",
-            "include":
-            [
-                "../..",
-                "/usr/include/libdrm"
-            ],
-            "libs":
-            [
-                "stdc++",
-                "pthread",
-                "m",
-                "GLESv2",
-                "EGL",
-                "gbm",
-                "drm"
-            ],
-            "define": [
-                "DEBUG_BUILD",
-                "PLATFORM_DIRECT_RENDER_MANAGER",
-                "PLATFORM_GLES",
-                "VERBOSE_BUILD",
-                "VERBOSE_SHADER_BUILD"
-            ]
-        },
-        "X11-debug":
-        {
-            "default": false,
-            "enable_all_warnings": true,
-            "standard": "c++17",
-            "optimisation": "0",
-            "debug_level": "2",
-            "include":
-            [
-                "../.."
-            ],
-            "libs":
-            [
-                "stdc++",
-                "pthread",
-                "m",
-                "GL",
-                "X11"
-            ],
-            "define": [
-                "DEBUG_BUILD",
-                "PLATFORM_X11_GL",
-                "VERBOSE_BUILD",
-                "VERBOSE_SHADER_BUILD"
             ]
         }
     }

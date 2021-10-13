@@ -116,13 +116,6 @@ struct Vert2Df
 	float x,y;
 };
 
-struct Vert2Ds
-{
-	Vert2Ds() = default;
-	Vert2Ds(int16_t pX,int16_t pY):x(pX),y(pY){};
-	int16_t x,y;
-};
-
 struct Vec2Db
 {
 	Vec2Db() = default;
@@ -132,7 +125,7 @@ struct Vec2Db
 
 struct Quad2D
 {
-	Vert2Ds v[4];
+	VertShortXY v[4];
 
 	const int16_t* data()const{return &v[0].x;}
 };
@@ -164,7 +157,7 @@ struct NinePatch
 {
 	NinePatch() = delete;
 
-	NinePatch(int pWidth,int pHeight,const Vert2Ds& pScaleFrom,const Vert2Ds& pScaleTo,const Vert2Ds& pFillFrom,const Vert2Ds& pFillTo)
+	NinePatch(int pWidth,int pHeight,const VertShortXY& pScaleFrom,const VertShortXY& pScaleTo,const VertShortXY& pFillFrom,const VertShortXY& pFillTo)
 	{
 		mScalable.from = pScaleFrom;
 		mScalable.to = pScaleTo;
@@ -195,11 +188,11 @@ struct NinePatch
 
 	struct
 	{
-		Vert2Ds from,to;
+		VertShortXY from,to;
 	}mScalable,mFillable;
 
-	Vert2Ds mVerts[4][4];
-	Vert2Ds mUVs[4][4];
+	VertShortXY mVerts[4][4];
+	VertShortXY mUVs[4][4];
 };
 
 enum struct StreamIndex
@@ -374,14 +367,14 @@ private:
 /**
  * @brief Simple utility for building quads on the fly.
  */
-struct Vert2DShortScratchBuffer : public ScratchBuffer<Vert2Ds,256,64,1024>
+struct Vert2DShortScratchBuffer : public ScratchBuffer<VertShortXY,256,64,1024>
 {
 	/**
 	 * @brief Writes six vertices to the buffer.
 	 */
 	inline void BuildQuad(int pX,int pY,int pWidth,int pHeight)
 	{
-		Vert2Ds* verts = Next(6);
+		VertShortXY* verts = Next(6);
 		verts[0].x = pX;			verts[0].y = pY;
 		verts[1].x = pX + pWidth;	verts[1].y = pY;
 		verts[2].x = pX + pWidth;	verts[2].y = pY + pHeight;
@@ -396,7 +389,7 @@ struct Vert2DShortScratchBuffer : public ScratchBuffer<Vert2Ds,256,64,1024>
 	 */
 	inline void AddUVRect(int U0,int V0,int U1,int V1)
 	{
-		Vert2Ds* verts = Next(6);
+		VertShortXY* verts = Next(6);
 		verts[0].x = U0;	verts[0].y = V0;
 		verts[1].x = U1;	verts[1].y = V0;
 		verts[2].x = U1;	verts[2].y = V1;
@@ -1128,7 +1121,7 @@ void GLES::OnApplicationExitRequest()
 
 //*******************************************
 // Primitive draw commands.
-void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+void GLES::DrawLine(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
 {
 	const int16_t quad[4] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY};
 
@@ -1139,6 +1132,98 @@ void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGr
 	glDrawArrays(GL_LINES,0,2);
 	CHECK_OGL_ERRORS();
 }
+
+void GLES::DrawLine(int pFromX,int pFromY,int pToX,int pToY,int pWidth,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	if( pWidth < 2 )
+	{
+		DrawLine(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue);
+	}
+	else
+	{
+		pWidth /= 2;
+		VertShortXY p[6];
+
+		if( pFromY < pToY )
+		{
+			std::swap(pFromY,pToY);
+			std::swap(pFromX,pToX);
+		}
+
+		if( pFromX < pToX )
+		{
+			p[0].x = pToX - pWidth;
+			p[0].y = pToY - pWidth;
+
+			p[1].x = pToX + pWidth;
+			p[1].y = pToY - pWidth;
+
+			p[2].x = pToX + pWidth;
+			p[2].y = pToY + pWidth;
+
+			p[3].x = pFromX + pWidth;
+			p[3].y = pFromY + pWidth;
+
+			p[4].x = pFromX - pWidth;
+			p[4].y = pFromY + pWidth;
+
+			p[5].x = pFromX - pWidth;
+			p[5].y = pFromY - pWidth;
+		}
+		else
+		{
+			p[0].x = pFromX + pWidth;
+			p[0].y = pFromY - pWidth;
+
+			p[1].x = pFromX + pWidth;
+			p[1].y = pFromY + pWidth;
+
+			p[2].x = pFromX - pWidth;
+			p[2].y = pFromY + pWidth;
+
+			p[3].x = pToX - pWidth;
+			p[3].y = pToY + pWidth;
+
+			p[4].x = pToX - pWidth;
+			p[4].y = pToY - pWidth;
+
+			p[5].x = pToX + pWidth;
+			p[5].y = pToY - pWidth;			
+		}
+
+		EnableShader(mShaders.ColourOnly2D);
+		mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+
+		VertexPtr(2,GL_SHORT,p);
+		glDrawArrays(GL_TRIANGLE_FAN,0,6);
+		CHECK_OGL_ERRORS();
+	}
+}
+
+void GLES::DrawLineList(const VerticesShortXY& pPoints,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	EnableShader(mShaders.ColourOnly2D);
+	mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+
+	VertexPtr(2,GL_SHORT,pPoints.data());
+	glDrawArrays(GL_LINE_STRIP,0,pPoints.size());
+	CHECK_OGL_ERRORS();
+}
+
+void GLES::DrawLineList(const VerticesShortXY& pPoints,int pWidth,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	if( pWidth < 2 )
+	{
+		DrawLineList(pPoints,pRed,pGreen,pBlue,pAlpha);
+	}
+	else
+	{
+		for( size_t n = 0 ; n < pPoints.size() - 1 ; n++ )
+		{
+			DrawLine(pPoints[n].x,pPoints[n].y,pPoints[n+1].x,pPoints[n+1].y,pWidth,pRed,pGreen,pBlue,pAlpha);
+		}
+	}
+}	
 
 void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,size_t pNumPoints,bool pFilled)
 {
@@ -1750,10 +1835,10 @@ uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,boo
 	const int oldStride = pWidth * 4;
 
 	// Extract the information
-	Vert2Ds scaleFrom = {-1,-1};
-	Vert2Ds scaleTo = {-1,-1};
-	Vert2Ds fillFrom = {-1,-1};
-	Vert2Ds fillTo = {-1,-1};
+	VertShortXY scaleFrom = {-1,-1};
+	VertShortXY scaleTo = {-1,-1};
+	VertShortXY fillFrom = {-1,-1};
+	VertShortXY fillTo = {-1,-1};
 
 	auto ScanNinePatch = [](uint8_t pPixel,int16_t pIndex,int16_t &pFrom,int16_t &pTo,const std::string& pWhat)
 	{
@@ -1866,7 +1951,7 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 	// We have to draw 9 rects, with the center scaling the texture.
 	const int xMove = pX + ((ninePinch->mScalable.to.x - ninePinch->mScalable.from.x) * pXScale);
 	const int yMove = pY + ((ninePinch->mScalable.to.y - ninePinch->mScalable.from.y) * pYScale);
-	Vert2Ds* verts = mWorkBuffers->vertices2DShort.Restart(16);
+	VertShortXY* verts = mWorkBuffers->vertices2DShort.Restart(16);
 	for( int y = 0 ; y < 4 ; y++ )
 	{
 		for( int x = 0 ; x < 4 ; x++, verts++ )
@@ -2309,7 +2394,7 @@ void GLES::BuildShaders()
 		uniform sampler2D u_tex0;
 		void main(void)
 		{
-			gl_FragColor = v_col * texture2D(u_tex0,v_tex0).aaaa;
+			gl_FragColor = vec4(v_col.rgb,texture2D(u_tex0,v_tex0).a);
 		}
 	)";
 
