@@ -2,6 +2,7 @@
 
 PROJECTS=(
     "./examples/2D/"
+    "./examples/3D/"
     "./examples/FreeTypeFont/"
     "./examples/NinePatch/"
     "./examples/PixelFont/"
