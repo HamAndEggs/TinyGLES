@@ -50,9 +50,9 @@
 // This is for linux systems that have no window manager. Like RPi4 running their light version of raspbian or a distro built with Yocto.
 #ifdef PLATFORM_DRM_EGL
 //sudo apt install libdrm
-	#include <xf86drm.h>
+	#include <xf86drm.h> // sudo apt install libdrm-dev
 	#include <xf86drmMode.h>
-	#include <gbm.h>	// This is used to get the egl stuff going. DRM is used to do the page flip to the display. Goes.. DRM -> GDM -> GLES (I think)
+	#include <gbm.h>	// sudo apt install libgbm-dev // This is used to get the egl stuff going. DRM is used to do the page flip to the display. Goes.. DRM -> GDM -> GLES (I think)
 	#include <drm_fourcc.h>
 	#include "EGL/egl.h"
 	#include "GLES2/gl2.h"
