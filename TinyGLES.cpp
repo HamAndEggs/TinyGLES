@@ -54,8 +54,8 @@
 	#include <xf86drmMode.h>
 	#include <gbm.h>	// sudo apt install libgbm-dev // This is used to get the egl stuff going. DRM is used to do the page flip to the display. Goes.. DRM -> GDM -> GLES (I think)
 	#include <drm_fourcc.h>
-	#include "EGL/egl.h"
-	#include "GLES2/gl2.h"
+	#include "EGL/egl.h" // sudo apt install libegl-dev
+	#include "GLES2/gl2.h" // sudo apt install libgles2-mesa-dev
 
 	#define EGL_NO_X11
 	#define MESA_EGL_NO_X11_HEADERS
