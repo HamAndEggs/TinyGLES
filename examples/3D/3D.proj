@@ -4,44 +4,11 @@
         "../SupportCode/TinyPNG.cpp",
         "../../TinyGLES.cpp"
     ],
-    "configurations":
+   "configurations":
     {
-        "bcm_host-GLES-debug":
+        "debug":
         {
             "default": true,
-            "enable_all_warnings": false,
-            "standard": "c++17",
-            "include":
-            [
-                "/opt/vc/include/",
-                "../.."
-            ],
-            "libs":
-            [
-                "stdc++",
-                "pthread",
-                "m",
-                "brcmGLESv2",
-                "brcmEGL",
-                "bcm_host",
-                "z"
-            ],
-            "libpaths":
-            [
-                "/opt/vc/lib"
-            ],
-            "define": [
-                "DEBUG_BUILD",
-                "BROADCOM_NATIVE_WINDOW",
-                "PLATFORM_EGL",
-                "PLATFORM_GLES"
-            ]
-        },
-        "DRM-debug":
-        {
-            "default": false,
-            "enable_all_warnings": false,
-            "standard": "c++17",
             "include":
             [
                 "../..",
@@ -58,19 +25,45 @@
                 "drm",
                 "z"
             ],
-            "define": [
+            "define":
+            [
                 "DEBUG_BUILD",
-                "PLATFORM_DIRECT_RENDER_MANAGER",
-                "PLATFORM_GLES",
+                "PLATFORM_DRM_EGL",
                 "VERBOSE_BUILD",
                 "VERBOSE_SHADER_BUILD"
             ]
         },
-        "X11-debug":
+        "release":
+        {
+            "default": false,
+            "include":
+            [
+                "../..",
+                "/usr/include/libdrm"
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "GLESv2",
+                "EGL",
+                "gbm",
+                "drm",
+                "z"
+            ],
+            "define":
+            [
+                "RELEASE_BUILD",
+                "PLATFORM_DRM_EGL",
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD"
+            ]
+        },
+        "x11":
         {
             "default": false,
             "enable_all_warnings": true,
-            "standard": "c++17",
             "optimisation": "0",
             "debug_level": "2",
             "include":
@@ -86,7 +79,8 @@
                 "X11",
                 "z"
             ],
-            "define": [
+            "define":
+            [
                 "DEBUG_BUILD",
                 "PLATFORM_X11_GL",
                 "VERBOSE_BUILD",
@@ -94,4 +88,5 @@
             ]
         }
     }
+
 }

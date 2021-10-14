@@ -47,31 +47,19 @@
 	#include <GL/glu.h>
 #endif
 
-// This is for RPi 3,2 and 1 (including zero)
-#ifdef BROADCOM_NATIVE_WINDOW // All included from /opt/vc/include
-	#include "bcm_host.h"
-#endif
-
 // This is for linux systems that have no window manager. Like RPi4 running their light version of raspbian or a distro built with Yocto.
-#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+#ifdef PLATFORM_DRM_EGL
 //sudo apt install libdrm
 	#include <xf86drm.h>
 	#include <xf86drmMode.h>
 	#include <gbm.h>	// This is used to get the egl stuff going. DRM is used to do the page flip to the display. Goes.. DRM -> GDM -> GLES (I think)
 	#include <drm_fourcc.h>
 	#include "EGL/egl.h"
+	#include "GLES2/gl2.h"
 
 	#define EGL_NO_X11
 	#define MESA_EGL_NO_X11_HEADERS
 
-#endif
-
-#ifdef PLATFORM_GLES
-	#include "GLES2/gl2.h"
-#endif
-
-#ifdef PLATFORM_EGL
-	#include "EGL/egl.h"
 #endif
 
 
@@ -116,13 +104,6 @@ struct Vert2Df
 	float x,y;
 };
 
-struct Vert2Ds
-{
-	Vert2Ds() = default;
-	Vert2Ds(int16_t pX,int16_t pY):x(pX),y(pY){};
-	int16_t x,y;
-};
-
 struct Vec2Db
 {
 	Vec2Db() = default;
@@ -132,7 +113,7 @@ struct Vec2Db
 
 struct Quad2D
 {
-	Vert2Ds v[4];
+	VertShortXY v[4];
 
 	const int16_t* data()const{return &v[0].x;}
 };
@@ -164,7 +145,7 @@ struct NinePatch
 {
 	NinePatch() = delete;
 
-	NinePatch(int pWidth,int pHeight,const Vert2Ds& pScaleFrom,const Vert2Ds& pScaleTo,const Vert2Ds& pFillFrom,const Vert2Ds& pFillTo)
+	NinePatch(int pWidth,int pHeight,const VertShortXY& pScaleFrom,const VertShortXY& pScaleTo,const VertShortXY& pFillFrom,const VertShortXY& pFillTo)
 	{
 		mScalable.from = pScaleFrom;
 		mScalable.to = pScaleTo;
@@ -195,11 +176,11 @@ struct NinePatch
 
 	struct
 	{
-		Vert2Ds from,to;
+		VertShortXY from,to;
 	}mScalable,mFillable;
 
-	Vert2Ds mVerts[4][4];
-	Vert2Ds mUVs[4][4];
+	VertShortXY mVerts[4][4];
+	VertShortXY mUVs[4][4];
 };
 
 enum struct StreamIndex
@@ -374,14 +355,14 @@ private:
 /**
  * @brief Simple utility for building quads on the fly.
  */
-struct Vert2DShortScratchBuffer : public ScratchBuffer<Vert2Ds,256,64,1024>
+struct Vert2DShortScratchBuffer : public ScratchBuffer<VertShortXY,256,64,1024>
 {
 	/**
 	 * @brief Writes six vertices to the buffer.
 	 */
 	inline void BuildQuad(int pX,int pY,int pWidth,int pHeight)
 	{
-		Vert2Ds* verts = Next(6);
+		VertShortXY* verts = Next(6);
 		verts[0].x = pX;			verts[0].y = pY;
 		verts[1].x = pX + pWidth;	verts[1].y = pY;
 		verts[2].x = pX + pWidth;	verts[2].y = pY + pHeight;
@@ -396,7 +377,7 @@ struct Vert2DShortScratchBuffer : public ScratchBuffer<Vert2Ds,256,64,1024>
 	 */
 	inline void AddUVRect(int U0,int V0,int U1,int V1)
 	{
-		Vert2Ds* verts = Next(6);
+		VertShortXY* verts = Next(6);
 		verts[0].x = U0;	verts[0].y = V0;
 		verts[1].x = U1;	verts[1].y = V0;
 		verts[2].x = U1;	verts[2].y = V1;
@@ -708,39 +689,9 @@ struct GLShader
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// EGL hidden definition.
-#ifdef PLATFORM_EGL
-struct PlatformInterface
-{
-	PlatformInterface();
-	~PlatformInterface();
-
-	void SwapBuffers();
-	void InitialiseDisplay();
-
-	void FindEGLConfiguration();
-
-	int GetWidth()const{return mScreenInfo.xres;}
-	int GetHeight()const{return mScreenInfo.yres;}
-
-	struct fb_var_screeninfo mScreenInfo;
-	EGLDisplay mDisplay = nullptr;				//!<GL display
-	EGLSurface mSurface = nullptr;				//!<GL rendering surface
-	EGLContext mContext = nullptr;				//!<GL rendering context
-	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
-
-#ifdef BROADCOM_NATIVE_WINDOW
-	EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
-#else
-	EGLNativeWindowType mNativeWindow = nullptr;
-#endif
-};
-#endif
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// DRM Direct Render Manager hidden definition.
+// DRM Direct Render Manager and EGL definition.
 // Used for more model systems like RPi4 and proper GL / GLES implementations.
-#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+#ifdef PLATFORM_DRM_EGL
 struct PlatformInterface
 {
 	bool mIsFirstFrame = true;
@@ -1128,7 +1079,7 @@ void GLES::OnApplicationExitRequest()
 
 //*******************************************
 // Primitive draw commands.
-void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+void GLES::DrawLine(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
 {
 	const int16_t quad[4] = {(int16_t)pFromX,(int16_t)pFromY,(int16_t)pToX,(int16_t)pToY};
 
@@ -1139,6 +1090,98 @@ void GLES::Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGr
 	glDrawArrays(GL_LINES,0,2);
 	CHECK_OGL_ERRORS();
 }
+
+void GLES::DrawLine(int pFromX,int pFromY,int pToX,int pToY,int pWidth,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	if( pWidth < 2 )
+	{
+		DrawLine(pFromX,pFromY,pToX,pToY,pRed,pGreen,pBlue);
+	}
+	else
+	{
+		pWidth /= 2;
+		VertShortXY p[6];
+
+		if( pFromY < pToY )
+		{
+			std::swap(pFromY,pToY);
+			std::swap(pFromX,pToX);
+		}
+
+		if( pFromX < pToX )
+		{
+			p[0].x = pToX - pWidth;
+			p[0].y = pToY - pWidth;
+
+			p[1].x = pToX + pWidth;
+			p[1].y = pToY - pWidth;
+
+			p[2].x = pToX + pWidth;
+			p[2].y = pToY + pWidth;
+
+			p[3].x = pFromX + pWidth;
+			p[3].y = pFromY + pWidth;
+
+			p[4].x = pFromX - pWidth;
+			p[4].y = pFromY + pWidth;
+
+			p[5].x = pFromX - pWidth;
+			p[5].y = pFromY - pWidth;
+		}
+		else
+		{
+			p[0].x = pFromX + pWidth;
+			p[0].y = pFromY - pWidth;
+
+			p[1].x = pFromX + pWidth;
+			p[1].y = pFromY + pWidth;
+
+			p[2].x = pFromX - pWidth;
+			p[2].y = pFromY + pWidth;
+
+			p[3].x = pToX - pWidth;
+			p[3].y = pToY + pWidth;
+
+			p[4].x = pToX - pWidth;
+			p[4].y = pToY - pWidth;
+
+			p[5].x = pToX + pWidth;
+			p[5].y = pToY - pWidth;			
+		}
+
+		EnableShader(mShaders.ColourOnly2D);
+		mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+
+		VertexPtr(2,GL_SHORT,p);
+		glDrawArrays(GL_TRIANGLE_FAN,0,6);
+		CHECK_OGL_ERRORS();
+	}
+}
+
+void GLES::DrawLineList(const VerticesShortXY& pPoints,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	EnableShader(mShaders.ColourOnly2D);
+	mShaders.CurrentShader->SetGlobalColour(pRed,pGreen,pBlue,pAlpha);
+
+	VertexPtr(2,GL_SHORT,pPoints.data());
+	glDrawArrays(GL_LINE_STRIP,0,pPoints.size());
+	CHECK_OGL_ERRORS();
+}
+
+void GLES::DrawLineList(const VerticesShortXY& pPoints,int pWidth,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha)
+{
+	if( pWidth < 2 )
+	{
+		DrawLineList(pPoints,pRed,pGreen,pBlue,pAlpha);
+	}
+	else
+	{
+		for( size_t n = 0 ; n < pPoints.size() - 1 ; n++ )
+		{
+			DrawLine(pPoints[n].x,pPoints[n].y,pPoints[n+1].x,pPoints[n+1].y,pWidth,pRed,pGreen,pBlue,pAlpha);
+		}
+	}
+}	
 
 void GLES::Circle(int pCenterX,int pCenterY,int pRadius,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha,size_t pNumPoints,bool pFilled)
 {
@@ -1750,10 +1793,10 @@ uint32_t GLES::CreateNinePatch(int pWidth,int pHeight,const uint8_t* pPixels,boo
 	const int oldStride = pWidth * 4;
 
 	// Extract the information
-	Vert2Ds scaleFrom = {-1,-1};
-	Vert2Ds scaleTo = {-1,-1};
-	Vert2Ds fillFrom = {-1,-1};
-	Vert2Ds fillTo = {-1,-1};
+	VertShortXY scaleFrom = {-1,-1};
+	VertShortXY scaleTo = {-1,-1};
+	VertShortXY fillFrom = {-1,-1};
+	VertShortXY fillTo = {-1,-1};
 
 	auto ScanNinePatch = [](uint8_t pPixel,int16_t pIndex,int16_t &pFrom,int16_t &pTo,const std::string& pWhat)
 	{
@@ -1866,7 +1909,7 @@ const NinePatchDrawInfo& GLES::DrawNinePatch(uint32_t pNinePatch,int pX,int pY,f
 	// We have to draw 9 rects, with the center scaling the texture.
 	const int xMove = pX + ((ninePinch->mScalable.to.x - ninePinch->mScalable.from.x) * pXScale);
 	const int yMove = pY + ((ninePinch->mScalable.to.y - ninePinch->mScalable.from.y) * pYScale);
-	Vert2Ds* verts = mWorkBuffers->vertices2DShort.Restart(16);
+	VertShortXY* verts = mWorkBuffers->vertices2DShort.Restart(16);
 	for( int y = 0 ; y < 4 ; y++ )
 	{
 		for( int x = 0 ; x < 4 ; x++, verts++ )
@@ -2309,7 +2352,7 @@ void GLES::BuildShaders()
 		uniform sampler2D u_tex0;
 		void main(void)
 		{
-			gl_FragColor = v_col * texture2D(u_tex0,v_tex0).aaaa;
+			gl_FragColor = vec4(v_col.rgb,texture2D(u_tex0,v_tex0).a);
 		}
 	)";
 
@@ -2858,7 +2901,7 @@ int GLShader::LoadShader(int type, const char* shaderCode)
 	int shaderFrag = glCreateShader(type);
 
 	// If we're GLES system we need to add "precision highp float"
-#ifdef PLATFORM_GLES
+#ifdef PLATFORM_DRM_EGL
 	const std::string glesShaderCode= std::string("precision highp float; ") + shaderCode;
 	shaderCode = glesShaderCode.c_str();
 #endif
@@ -3193,176 +3236,11 @@ void FreeTypeFont::BuildTexture(
 
 #endif //#ifdef USE_FREETYPEFONTS
 
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// EGL layer implementation
-#ifdef PLATFORM_EGL
-PlatformInterface::PlatformInterface()
-{
-	int File = open("/dev/fb0", O_RDWR);
-	if(ioctl(File, FBIOGET_VSCREENINFO, &mScreenInfo) ) 
-	{
-		THROW_MEANINGFUL_EXCEPTION("Failed to open ioctl on /dev/fb0. Can not fetch screen mode!");
-	}
-	close(File);
-
-	if( mScreenInfo.xres < 16 || mScreenInfo.yres < 16 )
-	{
-		THROW_MEANINGFUL_EXCEPTION("failed to find sensible screen mode from /dev/fb0");
-	}
-}
-
-PlatformInterface::~PlatformInterface()
-{
-	VERBOSE_MESSAGE("Destroying context");
-	eglDestroyContext(mDisplay, mContext);
-    eglDestroySurface(mDisplay, mSurface);
-    eglTerminate(mDisplay);
-}
-
-void PlatformInterface::SwapBuffers()
-{
-	assert(mDisplay);
-	assert(mSurface);
-	eglSwapBuffers(mDisplay,mSurface);
-}
-
-void PlatformInterface::InitialiseDisplay()
-{
-#ifdef BROADCOM_NATIVE_WINDOW
-	bcm_host_init();
-#endif
-
-	VERBOSE_MESSAGE("Calling eglGetDisplay");
-	mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-	if( !mDisplay )
-	{
-		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
-	}
-
-	//Now we have a display lets initialize it.
-	EGLint majorVersion,minorVersion;
-	if( !eglInitialize(mDisplay, &majorVersion, &minorVersion) )
-	{
-		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
-	}
-	CHECK_OGL_ERRORS();
-	VERBOSE_MESSAGE("EGL version " << majorVersion << "." << minorVersion);
-	eglBindAPI(EGL_OPENGL_ES_API);
-	CHECK_OGL_ERRORS();
-
-	FindEGLConfiguration();
-
-	//We have our display and have chosen the config so now we are ready to create the rendering context.
-	VERBOSE_MESSAGE("Creating context");
-	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
-	mContext = eglCreateContext(mDisplay,mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
-	if( !mContext )
-	{
-		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
-	}
-
-// This is annoying but GLES is just broken on RPi 3,2,1 and always has been and always will be. RPi4 is now DRM.
-#ifdef BROADCOM_NATIVE_WINDOW
-	VC_RECT_T dst_rect;
-	VC_RECT_T src_rect;
-
-	dst_rect.x = 0;
-	dst_rect.y = 0;
-	dst_rect.width = GetWidth();
-	dst_rect.height = GetHeight();
-
-	src_rect.x = 0;
-	src_rect.y = 0;
-	src_rect.width = dst_rect.width << 16;
-	src_rect.height = dst_rect.height << 16;        
-
-	DISPMANX_DISPLAY_HANDLE_T dispman_display = vc_dispmanx_display_open( 0 /* LCD */);
-	DISPMANX_UPDATE_HANDLE_T dispman_update = vc_dispmanx_update_start( 0 );
-
-	DISPMANX_ELEMENT_HANDLE_T dispman_element = vc_dispmanx_element_add(
-			dispman_update,
-			dispman_display,
-			0,&dst_rect,
-			0,&src_rect,
-			DISPMANX_PROTECTION_NONE,
-			nullptr,nullptr,
-			DISPMANX_NO_ROTATE);
-
-	mNativeWindow.element = dispman_element;
-	mNativeWindow.width = GetWidth();
-	mNativeWindow.height =  GetHeight();
-	vc_dispmanx_update_submit_sync( dispman_update );
-	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
-#else
-	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
-#endif //BROADCOM_NATIVE_WINDOW
-	CHECK_OGL_ERRORS();
-
-	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
-	CHECK_OGL_ERRORS();
-
-	eglSwapInterval(mDisplay,1);
-	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
-}
-
-void PlatformInterface::FindEGLConfiguration()
-{
-	int depths_32_to_16[3] = {32,24,16};
-
-	for( int c = 0 ; c < 3 ; c++ )
-	{
-		const EGLint attrib_list[] =
-		{
-			EGL_RED_SIZE,			8,
-			EGL_GREEN_SIZE,			8,
-			EGL_BLUE_SIZE,			8,
-			EGL_ALPHA_SIZE,			8,
-			EGL_DEPTH_SIZE,			depths_32_to_16[c],
-			EGL_STENCIL_SIZE,		EGL_DONT_CARE,
-			EGL_RENDERABLE_TYPE,	EGL_OPENGL_ES2_BIT,
-			EGL_NONE,				EGL_NONE
-		};
-
-		EGLint numConfigs;
-		if( !eglChooseConfig(mDisplay,attrib_list,&mConfig,1, &numConfigs) )
-		{
-			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
-		}
-
-		if( numConfigs > 0 )
-		{
-			EGLint bufSize,r,g,b,a,z,s = 0;
-
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_BUFFER_SIZE,&bufSize);
-
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_RED_SIZE,&r);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_GREEN_SIZE,&g);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_BLUE_SIZE,&b);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_ALPHA_SIZE,&a);
-
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_DEPTH_SIZE,&z);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_STENCIL_SIZE,&s);
-
-			CHECK_OGL_ERRORS();
-
-			VERBOSE_MESSAGE("Config found:");
-			VERBOSE_MESSAGE("\tFrame buffer size " << bufSize);
-			VERBOSE_MESSAGE("\tRGBA " << r << "," << g << "," << b << "," << a);
-			VERBOSE_MESSAGE("\tZBuffer " << z+s << "Z " << z << "S " << s);
-
-			return;// All good :)
-		}
-	}
-	THROW_MEANINGFUL_EXCEPTION("No matching EGL configs found");
-}
-#endif
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Direct Render Manager layer implementation
 // DRM Direct Render Manager hidden definition.
 // Used for more model systems like RPi4 and proper GL / GLES implementations.
-#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+#ifdef PLATFORM_DRM_EGL
 PlatformInterface::PlatformInterface()
 {
 	if( drmAvailable() == 0 )
@@ -3669,7 +3547,7 @@ void PlatformInterface::SwapBuffers()
 	gbm_surface_release_buffer(mNativeWindow,mCurrentFrontBufferObject);
 }
 
-#endif //#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+#endif //#ifdef PLATFORM_DRM_EGL
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // PLATFORM_X11_GL Implementation.

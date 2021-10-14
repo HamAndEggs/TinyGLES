@@ -270,6 +270,17 @@ struct VertXYZUV
 };
 typedef std::vector<VertXYZUV> VerticesXYZUV;
 
+// List of points, expected to be in screen space, mainly used for drawing line lists. Compressed into 16 bits per element.
+struct VertShortXY
+{
+	VertShortXY() = default;
+	VertShortXY(int16_t pX,int16_t pY):x(pX),y(pY){};
+
+	int16_t x,y;
+};
+typedef std::vector<VertShortXY> VerticesShortXY;
+
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
  * @brief Represents the linux GLES display.
@@ -372,8 +383,30 @@ public:
 // Primitive draw commands.
 	/**
 	 * @brief Draws an arbitrary line.
+	 * DrawLineH and DrawLineV exist only to aid in converting an app from Tiny2D to TinyGLES. I aim to try to keep the API 'simular'.
 	 */
-	void Line(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
+	void DrawLine(int pFromX,int pFromY,int pToX,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
+	inline void DrawLineH(int pFromX,int pFromY,int pToX,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){DrawLine(pFromX,pFromY,pToX,pFromY,pRed,pGreen,pBlue,pAlpha);}
+	inline void DrawLineV(int pFromX,int pFromY,int pToY,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255){DrawLine(pFromX,pFromY,pFromX,pToY,pRed,pGreen,pBlue,pAlpha);}
+
+	/**
+	 * @brief Draws a line of 'pWidth' pixels wide. If pWidth is < 1 then 1 is assumed.
+	 * Will take a short cut if the line 1 pixel width.
+	 */
+	void DrawLine(int pFromX,int pFromY,int pToX,int pToY,int pWidth,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
+
+	/**
+	 * @brief Draws linked lines 1 pixel wide.
+	 * The next line will continue where the last left off.
+	 */
+	void DrawLineList(const VerticesShortXY& pPoints,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
+
+	/**
+	 * @brief Draws linked lines of 'pWidth' pixels wide. If pWidth is < 1 then 1 is assumed.
+	 * The next line will continue where the last left off.
+	 * Will take a short cut if the line 1 pixel width.
+	 */
+	void DrawLineList(const VerticesShortXY& pPoints,int pWidth,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
 
 	/**
 	 * @brief Draws a circle using the pNumPoints to guide how many to use. I have set it to a nice default if < 1 -> 3 + (std::sqrt(pRadius)*3)

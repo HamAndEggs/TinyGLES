@@ -75,9 +75,9 @@ int main(int argc, char *argv[])
         GL.Clear(Bird_by_Magnus);
 
         
-        const tinygles::NinePatchDrawInfo& but1 = GL.DrawNinePatch(greenButtonNinePatch,100,10,6,6);
-        const tinygles::NinePatchDrawInfo& but2 = GL.DrawNinePatch(greenButtonNinePatch,100,200,8,1);
-        const tinygles::NinePatchDrawInfo& but3 = GL.DrawNinePatch(greenButtonNinePatch,100,300,20,1);
+        GL.DrawNinePatch(greenButtonNinePatch,100,10,6,6);
+        GL.DrawNinePatch(greenButtonNinePatch,100,200,8,1);
+        GL.DrawNinePatch(greenButtonNinePatch,100,300,20,1);
 
         const float bounceAnim = (1.0f + std::sin(anim*0.01f)) * 0.5f;// 0 - > 1 -> 0
         const float scale = 1.0f + bounceAnim*38.0f;
@@ -85,7 +85,7 @@ int main(int argc, char *argv[])
         GL.FillRectangle(100,400,100 + (61*scale*0.3f),400 + 65,greenButtonTexture);
         GL.FontPrint(100,420,"Without nine patch scaling");
 
-        const tinygles::NinePatchDrawInfo& but5 = GL.DrawNinePatch(greenButtonNinePatch,100,500,scale,1);
+        GL.DrawNinePatch(greenButtonNinePatch,100,500,scale,1);
         GL.FontPrint(100,520,"WITH! Nine patch scaling :)");
 
         GL.EndFrame();
