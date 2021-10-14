@@ -12,7 +12,9 @@ PROJECTS=(
 
 for t in ${PROJECTS[@]}; do
     cd "$t"
-    appbuild -c GLES-debug -r
+    appbuild -c debug -r
+    appbuild -c release -r
+    appbuild -c x11 -r
     cd -
 done
 

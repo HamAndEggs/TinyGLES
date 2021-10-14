@@ -47,31 +47,19 @@
 	#include <GL/glu.h>
 #endif
 
-// This is for RPi 3,2 and 1 (including zero)
-#ifdef BROADCOM_NATIVE_WINDOW // All included from /opt/vc/include
-	#include "bcm_host.h"
-#endif
-
 // This is for linux systems that have no window manager. Like RPi4 running their light version of raspbian or a distro built with Yocto.
-#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+#ifdef PLATFORM_DRM_EGL
 //sudo apt install libdrm
 	#include <xf86drm.h>
 	#include <xf86drmMode.h>
 	#include <gbm.h>	// This is used to get the egl stuff going. DRM is used to do the page flip to the display. Goes.. DRM -> GDM -> GLES (I think)
 	#include <drm_fourcc.h>
 	#include "EGL/egl.h"
+	#include "GLES2/gl2.h"
 
 	#define EGL_NO_X11
 	#define MESA_EGL_NO_X11_HEADERS
 
-#endif
-
-#ifdef PLATFORM_GLES
-	#include "GLES2/gl2.h"
-#endif
-
-#ifdef PLATFORM_EGL
-	#include "EGL/egl.h"
 #endif
 
 
@@ -701,39 +689,9 @@ struct GLShader
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// EGL hidden definition.
-#ifdef PLATFORM_EGL
-struct PlatformInterface
-{
-	PlatformInterface();
-	~PlatformInterface();
-
-	void SwapBuffers();
-	void InitialiseDisplay();
-
-	void FindEGLConfiguration();
-
-	int GetWidth()const{return mScreenInfo.xres;}
-	int GetHeight()const{return mScreenInfo.yres;}
-
-	struct fb_var_screeninfo mScreenInfo;
-	EGLDisplay mDisplay = nullptr;				//!<GL display
-	EGLSurface mSurface = nullptr;				//!<GL rendering surface
-	EGLContext mContext = nullptr;				//!<GL rendering context
-	EGLConfig mConfig = nullptr;				//!<Configuration of the display.
-
-#ifdef BROADCOM_NATIVE_WINDOW
-	EGL_DISPMANX_WINDOW_T mNativeWindow;		//!<The RPi window object needed to create the render surface.
-#else
-	EGLNativeWindowType mNativeWindow = nullptr;
-#endif
-};
-#endif
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// DRM Direct Render Manager hidden definition.
+// DRM Direct Render Manager and EGL definition.
 // Used for more model systems like RPi4 and proper GL / GLES implementations.
-#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+#ifdef PLATFORM_DRM_EGL
 struct PlatformInterface
 {
 	bool mIsFirstFrame = true;
@@ -2943,7 +2901,7 @@ int GLShader::LoadShader(int type, const char* shaderCode)
 	int shaderFrag = glCreateShader(type);
 
 	// If we're GLES system we need to add "precision highp float"
-#ifdef PLATFORM_GLES
+#ifdef PLATFORM_DRM_EGL
 	const std::string glesShaderCode= std::string("precision highp float; ") + shaderCode;
 	shaderCode = glesShaderCode.c_str();
 #endif
@@ -3278,176 +3236,11 @@ void FreeTypeFont::BuildTexture(
 
 #endif //#ifdef USE_FREETYPEFONTS
 
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////
-// EGL layer implementation
-#ifdef PLATFORM_EGL
-PlatformInterface::PlatformInterface()
-{
-	int File = open("/dev/fb0", O_RDWR);
-	if(ioctl(File, FBIOGET_VSCREENINFO, &mScreenInfo) ) 
-	{
-		THROW_MEANINGFUL_EXCEPTION("Failed to open ioctl on /dev/fb0. Can not fetch screen mode!");
-	}
-	close(File);
-
-	if( mScreenInfo.xres < 16 || mScreenInfo.yres < 16 )
-	{
-		THROW_MEANINGFUL_EXCEPTION("failed to find sensible screen mode from /dev/fb0");
-	}
-}
-
-PlatformInterface::~PlatformInterface()
-{
-	VERBOSE_MESSAGE("Destroying context");
-	eglDestroyContext(mDisplay, mContext);
-    eglDestroySurface(mDisplay, mSurface);
-    eglTerminate(mDisplay);
-}
-
-void PlatformInterface::SwapBuffers()
-{
-	assert(mDisplay);
-	assert(mSurface);
-	eglSwapBuffers(mDisplay,mSurface);
-}
-
-void PlatformInterface::InitialiseDisplay()
-{
-#ifdef BROADCOM_NATIVE_WINDOW
-	bcm_host_init();
-#endif
-
-	VERBOSE_MESSAGE("Calling eglGetDisplay");
-	mDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-	if( !mDisplay )
-	{
-		THROW_MEANINGFUL_EXCEPTION("Couldn\'t open the EGL default display");
-	}
-
-	//Now we have a display lets initialize it.
-	EGLint majorVersion,minorVersion;
-	if( !eglInitialize(mDisplay, &majorVersion, &minorVersion) )
-	{
-		THROW_MEANINGFUL_EXCEPTION("eglInitialize() failed");
-	}
-	CHECK_OGL_ERRORS();
-	VERBOSE_MESSAGE("EGL version " << majorVersion << "." << minorVersion);
-	eglBindAPI(EGL_OPENGL_ES_API);
-	CHECK_OGL_ERRORS();
-
-	FindEGLConfiguration();
-
-	//We have our display and have chosen the config so now we are ready to create the rendering context.
-	VERBOSE_MESSAGE("Creating context");
-	EGLint ai32ContextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
-	mContext = eglCreateContext(mDisplay,mConfig,EGL_NO_CONTEXT,ai32ContextAttribs);
-	if( !mContext )
-	{
-		THROW_MEANINGFUL_EXCEPTION("Failed to get a rendering context");
-	}
-
-// This is annoying but GLES is just broken on RPi 3,2,1 and always has been and always will be. RPi4 is now DRM.
-#ifdef BROADCOM_NATIVE_WINDOW
-	VC_RECT_T dst_rect;
-	VC_RECT_T src_rect;
-
-	dst_rect.x = 0;
-	dst_rect.y = 0;
-	dst_rect.width = GetWidth();
-	dst_rect.height = GetHeight();
-
-	src_rect.x = 0;
-	src_rect.y = 0;
-	src_rect.width = dst_rect.width << 16;
-	src_rect.height = dst_rect.height << 16;        
-
-	DISPMANX_DISPLAY_HANDLE_T dispman_display = vc_dispmanx_display_open( 0 /* LCD */);
-	DISPMANX_UPDATE_HANDLE_T dispman_update = vc_dispmanx_update_start( 0 );
-
-	DISPMANX_ELEMENT_HANDLE_T dispman_element = vc_dispmanx_element_add(
-			dispman_update,
-			dispman_display,
-			0,&dst_rect,
-			0,&src_rect,
-			DISPMANX_PROTECTION_NONE,
-			nullptr,nullptr,
-			DISPMANX_NO_ROTATE);
-
-	mNativeWindow.element = dispman_element;
-	mNativeWindow.width = GetWidth();
-	mNativeWindow.height =  GetHeight();
-	vc_dispmanx_update_submit_sync( dispman_update );
-	mSurface = eglCreateWindowSurface(mDisplay,mConfig,&mNativeWindow,0);
-#else
-	mSurface = eglCreateWindowSurface(mDisplay,mConfig,mNativeWindow,0);
-#endif //BROADCOM_NATIVE_WINDOW
-	CHECK_OGL_ERRORS();
-
-	eglMakeCurrent(mDisplay, mSurface, mSurface, mContext );
-	CHECK_OGL_ERRORS();
-
-	eglSwapInterval(mDisplay,1);
-	glColorMask(EGL_TRUE,EGL_TRUE,EGL_TRUE,EGL_FALSE);// Have to mask out alpha as some systems (RPi show the terminal behind)
-}
-
-void PlatformInterface::FindEGLConfiguration()
-{
-	int depths_32_to_16[3] = {32,24,16};
-
-	for( int c = 0 ; c < 3 ; c++ )
-	{
-		const EGLint attrib_list[] =
-		{
-			EGL_RED_SIZE,			8,
-			EGL_GREEN_SIZE,			8,
-			EGL_BLUE_SIZE,			8,
-			EGL_ALPHA_SIZE,			8,
-			EGL_DEPTH_SIZE,			depths_32_to_16[c],
-			EGL_STENCIL_SIZE,		EGL_DONT_CARE,
-			EGL_RENDERABLE_TYPE,	EGL_OPENGL_ES2_BIT,
-			EGL_NONE,				EGL_NONE
-		};
-
-		EGLint numConfigs;
-		if( !eglChooseConfig(mDisplay,attrib_list,&mConfig,1, &numConfigs) )
-		{
-			THROW_MEANINGFUL_EXCEPTION("Error: eglGetConfigs() failed");
-		}
-
-		if( numConfigs > 0 )
-		{
-			EGLint bufSize,r,g,b,a,z,s = 0;
-
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_BUFFER_SIZE,&bufSize);
-
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_RED_SIZE,&r);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_GREEN_SIZE,&g);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_BLUE_SIZE,&b);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_ALPHA_SIZE,&a);
-
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_DEPTH_SIZE,&z);
-			eglGetConfigAttrib(mDisplay,mConfig,EGL_STENCIL_SIZE,&s);
-
-			CHECK_OGL_ERRORS();
-
-			VERBOSE_MESSAGE("Config found:");
-			VERBOSE_MESSAGE("\tFrame buffer size " << bufSize);
-			VERBOSE_MESSAGE("\tRGBA " << r << "," << g << "," << b << "," << a);
-			VERBOSE_MESSAGE("\tZBuffer " << z+s << "Z " << z << "S " << s);
-
-			return;// All good :)
-		}
-	}
-	THROW_MEANINGFUL_EXCEPTION("No matching EGL configs found");
-}
-#endif
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Direct Render Manager layer implementation
 // DRM Direct Render Manager hidden definition.
 // Used for more model systems like RPi4 and proper GL / GLES implementations.
-#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+#ifdef PLATFORM_DRM_EGL
 PlatformInterface::PlatformInterface()
 {
 	if( drmAvailable() == 0 )
@@ -3754,7 +3547,7 @@ void PlatformInterface::SwapBuffers()
 	gbm_surface_release_buffer(mNativeWindow,mCurrentFrontBufferObject);
 }
 
-#endif //#ifdef PLATFORM_DIRECT_RENDER_MANAGER
+#endif //#ifdef PLATFORM_DRM_EGL
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // PLATFORM_X11_GL Implementation.
