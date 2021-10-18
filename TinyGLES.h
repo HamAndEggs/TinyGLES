@@ -601,11 +601,20 @@ public:
 	uint32_t FontLoad(const std::string& pFontName,int pPixelHeight = 40);
 	void FontDelete(uint32_t pFont);
 
+	/**
+	 * @brief renders the font at x and y, y is where the baseline is rendered.
+	 */
 	void FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText);
 	void FontPrintf(uint32_t pFont,int pX,int pY,const char* pFmt,...);
 
 	int FontGetPrintWidth(uint32_t pFont,const std::string_view& pText);
 	int FontGetPrintfWidth(uint32_t pFont,const char* pFmt,...);
+
+	/**
+	 * @brief Returns the number of pixels for the higest character above the baseline.
+	 * Handy for font centering in a rectangle.
+	 */
+	int FontGetHeight(uint32_t pFont)const;
 
 	void FontSetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
 	void FontSetMaximumAllowedGlyph(int pMaxSize){mMaximumAllowedGlyph = pMaxSize;} // The default size is 128 per character. Any bigger will throw an exception, this allows you to go bigger, but kiss good by to vram. Really should do something else instead!

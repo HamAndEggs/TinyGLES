@@ -486,6 +486,7 @@ struct FreeTypeFont
 	FT_Face mFace;								//<! The font we are rending from.
 	uint32_t mTexture;							//<! This is the texture that the glyphs are in so we can render using GL and quads. It's crud but works. ;)
 	std::array<FreeTypeFont::Glyph,96>mGlyphs;	//<! Meta data needed to render the characters.
+	int mBaselineHeight;						//<! This is the number of pixels above baseline the higest character is. Used for centering a font in the y.
 
 	struct
 	{
@@ -2192,6 +2193,12 @@ int GLES::FontGetPrintfWidth(uint32_t pFont,const char* pFmt,...)
 	return FontGetPrintWidth(pFont,buf);	
 }
 
+int GLES::FontGetHeight(uint32_t pFont)const
+{
+	auto& font = mFreeTypeFonts.at(pFont);
+	return font->mBaselineHeight;
+}
+
 #endif
 // End of free type font.
 //*******************************************
@@ -3079,6 +3086,7 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 	//  any glyph in the face, starting from the glyph baseline.
 	// Code changed, was casing it to render in the Y center of the font not on the base line. Will add it as an option in the future. Richard.
 	int bbox_ymax = 0;//mFace->bbox.yMax / 64;
+	mBaselineHeight = std::max(mBaselineHeight,(int)mFace->bbox.yMax / 64);
 
 	// glyph_width is the pixel width of this specific glyph
 	int glyph_width = mFace->glyph->metrics.width / 64;
@@ -3151,6 +3159,7 @@ void FreeTypeFont::BuildTexture(
 {
 
 	int maxX = 0,maxY = 0;
+	mBaselineHeight = 0;
 
 	std::array<std::vector<uint8_t>,96>glyphsPixels;
 	for( int c = 0 ; c < 96 ; c++ )// Cheap and quick font ASCII renderer. I'm not geeting into unicode. It's a nightmare to make fast in GL on a resource constrained system!
@@ -3170,7 +3179,7 @@ void FreeTypeFont::BuildTexture(
 			}
 		}
 	}
-	VERBOSE_MESSAGE("Font max glyph size requirement for cache is " << maxX << " " << maxY);
+	VERBOSE_MESSAGE("Font max glyph size requirement for cache is " << maxX << " " << maxY << " mBaselineHeight = " << mBaselineHeight);
 	if( maxX > pMaximumAllowedGlyph || maxY > pMaximumAllowedGlyph )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Font: " + mFontName + " requires a very large texture as it's maximun size glyph is very big, maxX == " + std::to_string(maxX) + " maxY == " + std::to_string(maxY) + ". This creation has been halted. Please reduce size of font!");
