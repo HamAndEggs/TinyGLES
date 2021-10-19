@@ -3331,10 +3331,10 @@ int PlatformInterface::FindMouseDevice()
 		{
 			// Get it's version.
 			int version = 0;
-			if( ioctl(device, EVIOCGVERSION, &version) == 0 )
+			if( ioctl(device, EVIOCGVERSION, &version) > 0 )
 			{	// That worked, keep going. Get it's ID
 				struct input_id id;
-				if( ioctl(device, EVIOCGID, &id) == 0 )
+				if( ioctl(device, EVIOCGID, &id) > 0 )
 				{// Get the name
 					char name[256] = "Unknown";
 					if( ioctl(device, EVIOCGNAME(sizeof(name)), name) > 0 )
