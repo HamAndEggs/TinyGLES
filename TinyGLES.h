@@ -137,9 +137,7 @@ enum struct SystemEventType
 	EXIT_REQUEST,	//!< User closed the window or pressed ctrl + c
 
 	// Generic display mouse or touch events.
-	POINTER_MOVE,
-	POINTER_DOWN,
-	POINTER_UP
+	POINTER_UPDATED		//!< Something about the pointer / touch screen changed.
 };
 
 /**
@@ -168,8 +166,9 @@ struct SystemEventData
 
 	struct
 	{
-		int X = 0;
-		int Y = 0;
+		int x = 0;
+		int y = 0;
+		bool touched = false;
 	}mPointer;
 
 	SystemEventData(SystemEventType pType) : mType(pType){}
@@ -720,6 +719,7 @@ private:
 		 */
 		struct
 		{
+			bool touched = false;
 			int x = 0;
 			int y = 0;
 		}mCurrent;

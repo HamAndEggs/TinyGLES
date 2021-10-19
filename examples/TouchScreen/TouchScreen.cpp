@@ -111,8 +111,8 @@ public:
     void SetPressed(bool pPressed){mPressed = pPressed;}
 
 private:
-    const int mRound = 10;
-    const int mShadowOffset = 4;
+    const int mRound = 17;
+    const int mShadowOffset = 8;
     Rectangle mRect;
     uint8_t mRed,mGreen,mBlue;
 
@@ -125,35 +125,28 @@ private:
 int main(int argc, char *argv[])
 {
     const std::string faceName("../data/CM Sans Serif 2012.ttf");
-    gNormalFont = GL.FontLoad(faceName,20);
+    gNormalFont = GL.FontLoad(faceName,40);
 
     std::vector<std::unique_ptr<Button>> myButtons;
 
-    myButtons.push_back( std::make_unique<Button>(100,100,120,40,33,150,243,"Log out") );
-    myButtons.push_back( std::make_unique<Button>(260,100,120,40,33,150,243,"Invite") );
+    myButtons.push_back( std::make_unique<Button>(100,100,220,80,33,150,243,"Log out") );
+    myButtons.push_back( std::make_unique<Button>(350,100,220,80,33,150,243,"Invite") );
 
     GL.SetSystemEventHandler([&myButtons](const tinygles::SystemEventData& pEvent)
     {
-        if( pEvent.mType == tinygles::SystemEventType::POINTER_DOWN )
+        if( pEvent.mType == tinygles::SystemEventType::POINTER_UPDATED )
         {
             for( auto& b : myButtons )
             {
-                if( b->ContainsPoint(pEvent.mPointer.X,pEvent.mPointer.Y) )
+                if( b->ContainsPoint(pEvent.mPointer.x,pEvent.mPointer.y) )
                 {
-                    b->SetPressed(true);
+                    b->SetPressed(pEvent.mPointer.touched);
                 }
                 else
                 {
                     b->SetPressed(false);
                 }
-            }            
-        }
-        else if( pEvent.mType == tinygles::SystemEventType::POINTER_UP )
-        {
-            for( auto& b : myButtons )
-            {
-                b->SetPressed(false);
-            }            
+            }
         }
     });
 

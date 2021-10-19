@@ -787,7 +787,7 @@ GLES::GLES(uint32_t pFlags) :
 	// Lets hook ctrl + c.
 	mUsersSignalAction = signal(SIGINT,CtrlHandler);
 
-	const char* MouseDeviceName = "/dev/input/event0";
+	const char* MouseDeviceName = "/dev/input/event2";
 	mPointer.mDevice = open(MouseDeviceName,O_RDONLY|O_NONBLOCK); // May fail, this is ok. They may not have one.
 #ifdef VERBOSE_BUILD
 	if(  mPointer.mDevice >  0 )
@@ -2229,9 +2229,11 @@ void GLES::ProcessSystemEvents()
 				switch (ev.code)
 				{
 				case BTN_TOUCH:
-					SystemEventData data((ev.value != 0) ? SystemEventType::POINTER_DOWN : SystemEventType::POINTER_UP);
-					data.mPointer.X = mPointer.mCurrent.x;
-					data.mPointer.Y = mPointer.mCurrent.y;
+					mPointer.mCurrent.touched = (ev.value != 0);
+					SystemEventData data(SystemEventType::POINTER_UPDATED);
+					data.mPointer.x = mPointer.mCurrent.x;
+					data.mPointer.y = mPointer.mCurrent.y;
+					data.mPointer.touched = mPointer.mCurrent.touched;
 					mSystemEventHandler(data);
 					break;
 				}
@@ -2248,9 +2250,10 @@ void GLES::ProcessSystemEvents()
 					mPointer.mCurrent.y = ev.value;
 					break;
 				}
-				SystemEventData data(SystemEventType::POINTER_MOVE);
-				data.mPointer.X = mPointer.mCurrent.x;
-				data.mPointer.Y = mPointer.mCurrent.y;
+				SystemEventData data(SystemEventType::POINTER_UPDATED);
+				data.mPointer.x = mPointer.mCurrent.x;
+				data.mPointer.y = mPointer.mCurrent.y;
+				data.mPointer.touched = mPointer.mCurrent.touched;
 				mSystemEventHandler(data);
 				break;
 			}
@@ -2694,7 +2697,7 @@ bool GLES::mCTRL_C_Pressed = false;
 void GLES::CtrlHandler(int SigNum)
 {
 	static int numTimesAskedToExit = 0;
-	// Propergate to someone elses handler, if they felt they wanted to add one too.
+	// Propergate to someone else's handler, if they felt they wanted to add one too.
 	if( mUsersSignalAction != NULL )
 	{
 		mUsersSignalAction(SigNum);
@@ -3544,10 +3547,12 @@ void PlatformInterface::SwapBuffers()
 		FD_SET(0, &fds);
 		FD_SET(mDRMFile, &fds);
 
+		// For some reason this fails when we do ctrl + c dispite hooking into the interrupt.
 		ret = select(mDRMFile + 1, &fds, NULL, NULL, NULL);
-		if (ret < 0)
+		if( ret < 0 )
 		{
-			THROW_MEANINGFUL_EXCEPTION("PlatformInterface::SwapBuffer select on DRM file failed to queue page flip " + std::string(strerror(errno)));
+			// I wanted this to be an exception but could not, see comment on the select. So just cout::error for now...	
+			std::cerr << "PlatformInterface::SwapBuffer select on DRM file failed to queue page flip " << std::string(strerror(errno)) << "\n";
 		}
 
 		drmHandleEvent(mDRMFile, &evctx);
@@ -3690,6 +3695,7 @@ bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEve
 		THROW_MEANINGFUL_EXCEPTION("The X11 display object is NULL!");
 	}
 
+	static bool touched = false;
 	while( XPending(mXDisplay) )
 	{
 		XEvent e;
@@ -3727,9 +3733,10 @@ bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEve
 		case MotionNotify:// Mouse movement
 			if( pEventHandler )
 			{
-				SystemEventData data(SystemEventType::POINTER_MOVE);
-				data.mPointer.X = e.xmotion.x;
-				data.mPointer.Y = e.xmotion.y;
+				SystemEventData data(SystemEventType::POINTER_UPDATED);
+				data.mPointer.x = e.xmotion.x;
+				data.mPointer.y = e.xmotion.y;
+				data.mPointer.touched = touched;
 				pEventHandler(data);
 			}
 			break;
@@ -3737,9 +3744,12 @@ bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEve
 		case ButtonPress:
 			if( pEventHandler )
 			{
-				SystemEventData data(SystemEventType::POINTER_DOWN);
-				data.mPointer.X = e.xbutton.x;
-				data.mPointer.Y = e.xbutton.y;
+				touched = true;
+
+				SystemEventData data(SystemEventType::POINTER_UPDATED);
+				data.mPointer.x = e.xbutton.x;
+				data.mPointer.y = e.xbutton.y;
+				data.mPointer.touched = touched;
 				pEventHandler(data);
 			}
 			break;
@@ -3747,9 +3757,12 @@ bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEve
 		case ButtonRelease:
 			if( pEventHandler )
 			{
-				SystemEventData data(SystemEventType::POINTER_UP);
-				data.mPointer.X = e.xbutton.x;
-				data.mPointer.Y = e.xbutton.y;
+				touched = false;
+
+				SystemEventData data(SystemEventType::POINTER_UPDATED);
+				data.mPointer.x = e.xbutton.x;
+				data.mPointer.y = e.xbutton.y;
+				data.mPointer.touched = touched;
 				pEventHandler(data);
 			}
 			break;
