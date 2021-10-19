@@ -707,24 +707,6 @@ private:
 		int scale = 1;
 	}mPixelFont;
 
-	/**
-	 * @brief Information about the mouse driver
-	 */
-	struct
-	{
-		int mDevice = 0; //!< File handle to /dev/input/mice
-
-		/**
-		 * @brief Maintains the current known values. Because we get many messages.
-		 */
-		struct
-		{
-			bool touched = false;
-			int x = 0;
-			int y = 0;
-		}mCurrent;
-	}mPointer;
-
 	struct
 	{
 		TinyShader ColourOnly2D;

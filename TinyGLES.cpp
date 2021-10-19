@@ -715,11 +715,34 @@ struct PlatformInterface
 
 	struct gbm_surface *mNativeWindow = nullptr;
 
+	/**
+	 * @brief Information about the mouse driver
+	 */
+	struct
+	{
+		int mDevice = 0; //!< File handle to /dev/input/mice
+
+		/**
+		 * @brief Maintains the current known values. Because we get many messages.
+		 */
+		struct
+		{
+			bool touched = false;
+			int x = 0;
+			int y = 0;
+		}mCurrent;
+	}mPointer;
+
 	PlatformInterface();
 	~PlatformInterface();
 
 	int GetWidth()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->hdisplay;}return 0;}
 	int GetHeight()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->vdisplay;}return 0;}
+
+	/**
+	 * @brief Processes the X11 events then exits when all are done. Returns true if the app is asked to quit.
+	 */
+	bool ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler);
 
 
 	void InitialiseDisplay();
@@ -763,7 +786,7 @@ struct PlatformInterface
 	/**
 	 * @brief Processes the X11 events then exits when all are done. Returns true if the app is asked to quit.
 	 */
-	bool ProcessX11Events(tinygles::GLES::SystemEventHandler pEventHandler);
+	bool ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler);
 
 	/**
 	 * @brief Draws the frame buffer to the X11 window.
@@ -786,24 +809,6 @@ GLES::GLES(uint32_t pFlags) :
 {
 	// Lets hook ctrl + c.
 	mUsersSignalAction = signal(SIGINT,CtrlHandler);
-
-	const char* MouseDeviceName = "/dev/input/event2";
-	mPointer.mDevice = open(MouseDeviceName,O_RDONLY|O_NONBLOCK); // May fail, this is ok. They may not have one.
-#ifdef VERBOSE_BUILD
-	if(  mPointer.mDevice >  0 )
-	{
-		VERBOSE_MESSAGE("Opened mouse device " << MouseDeviceName);
-		char name[256] = "Unknown";
-		if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
-		{
-			VERBOSE_MESSAGE("Reading mouse from: handle = " << mPointer.mDevice << " name = " << name);
-		}
-	}
-	else
-	{// Not an error, may not have one connected. Depends on the usecase.
-		VERBOSE_MESSAGE("Failed to open mouse device " << MouseDeviceName);
-	}
-#endif
 
 	mPhysical.Width = mPlatform->GetWidth();
 	mPhysical.Height = mPlatform->GetHeight();
@@ -2205,59 +2210,11 @@ int GLES::FontGetHeight(uint32_t pFont)const
 
 void GLES::ProcessSystemEvents()
 {
-#ifdef PLATFORM_X11_GL
-	mCTRL_C_Pressed = mPlatform->ProcessX11Events(mSystemEventHandler);
-#endif
-
-	// We don't bother to read the mouse if no pEventHandler has been registered. Would be a waste of time.
-	if( mPointer.mDevice > 0 && mSystemEventHandler )
-	{
-		struct input_event ev;
-		// Grab all messages and process befor going to next frame.
-		while( read(mPointer.mDevice,&ev,sizeof(ev)) > 0 )
-		{
-			// EV_SYN is a seperator of events.
-#ifdef VERBOSE_BUILD
-			if( ev.type != EV_ABS && ev.type != EV_KEY && ev.type != EV_SYN )
-			{// Anything I missed? 
-				std::cout << std::hex << ev.type << " " << ev.code << " " << ev.value << "\n";
-			}
-#endif
-			switch( ev.type )
-			{
-			case EV_KEY:
-				switch (ev.code)
-				{
-				case BTN_TOUCH:
-					mPointer.mCurrent.touched = (ev.value != 0);
-					SystemEventData data(SystemEventType::POINTER_UPDATED);
-					data.mPointer.x = mPointer.mCurrent.x;
-					data.mPointer.y = mPointer.mCurrent.y;
-					data.mPointer.touched = mPointer.mCurrent.touched;
-					mSystemEventHandler(data);
-					break;
-				}
-				break;
-
-			case EV_ABS:
-				switch (ev.code)
-				{
-				case ABS_X:
-					mPointer.mCurrent.x = ev.value;
-					break;
-
-				case ABS_Y:
-					mPointer.mCurrent.y = ev.value;
-					break;
-				}
-				SystemEventData data(SystemEventType::POINTER_UPDATED);
-				data.mPointer.x = mPointer.mCurrent.x;
-				data.mPointer.y = mPointer.mCurrent.y;
-				data.mPointer.touched = mPointer.mCurrent.touched;
-				mSystemEventHandler(data);
-				break;
-			}
-		}
+	if( mPlatform->ProcessEvents(mSystemEventHandler) )
+	{// A system event asked to quit. Like window close button.
+	 // Only set to true based on return of ProcessEvents, if we wrote to it run the risk of missing the ctrl+c message
+	 // from the interrupt call back as it would be overwritten with a false.
+		mCTRL_C_Pressed = true;	
 	}
 
 	// Finnally, did they ctrl + c ?
@@ -3255,6 +3212,25 @@ void FreeTypeFont::BuildTexture(
 #ifdef PLATFORM_DRM_EGL
 PlatformInterface::PlatformInterface()
 {
+//	const char* MouseDeviceName = "/dev/input/event2";
+	const char* MouseDeviceName = "/dev/input/mouse0";
+	mPointer.mDevice = open(MouseDeviceName,O_RDONLY|O_NONBLOCK); // May fail, this is ok. They may not have one.
+#ifdef VERBOSE_BUILD
+	if(  mPointer.mDevice >  0 )
+	{
+		VERBOSE_MESSAGE("Opened mouse device " << MouseDeviceName);
+		char name[256] = "Unknown";
+		if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
+		{
+			VERBOSE_MESSAGE("Reading mouse from: handle = " << mPointer.mDevice << " name = " << name);
+		}
+	}
+	else
+	{// Not an error, may not have one connected. Depends on the usecase.
+		VERBOSE_MESSAGE("Failed to open mouse device " << MouseDeviceName);
+	}
+#endif
+
 	if( drmAvailable() == 0 )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Kernel DRM driver not loaded");
@@ -3351,6 +3327,62 @@ PlatformInterface::~PlatformInterface()
 	drmModeFreeEncoder(mModeEncoder);
 	drmModeFreeConnector(mConnector);
 	close(mDRMFile);
+	close(mPointer.mDevice);
+}
+
+bool PlatformInterface::ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler)
+{
+	// We don't bother to read the mouse if no pEventHandler has been registered. Would be a waste of time.
+	if( mPointer.mDevice > 0 && pEventHandler )
+	{
+		struct input_event ev;
+		// Grab all messages and process befor going to next frame.
+		while( read(mPointer.mDevice,&ev,sizeof(ev)) > 0 )
+		{
+			// EV_SYN is a seperator of events.
+#ifdef VERBOSE_BUILD
+			if( ev.type != EV_ABS && ev.type != EV_KEY && ev.type != EV_SYN )
+			{// Anything I missed? 
+				std::cout << std::hex << ev.type << " " << ev.code << " " << ev.value << "\n";
+			}
+#endif
+			switch( ev.type )
+			{
+			case EV_KEY:
+				switch (ev.code)
+				{
+				case BTN_TOUCH:
+					mPointer.mCurrent.touched = (ev.value != 0);
+					SystemEventData data(SystemEventType::POINTER_UPDATED);
+					data.mPointer.x = mPointer.mCurrent.x;
+					data.mPointer.y = mPointer.mCurrent.y;
+					data.mPointer.touched = mPointer.mCurrent.touched;
+					pEventHandler(data);
+					break;
+				}
+				break;
+
+			case EV_ABS:
+				switch (ev.code)
+				{
+				case ABS_X:
+					mPointer.mCurrent.x = ev.value;
+					break;
+
+				case ABS_Y:
+					mPointer.mCurrent.y = ev.value;
+					break;
+				}
+				SystemEventData data(SystemEventType::POINTER_UPDATED);
+				data.mPointer.x = mPointer.mCurrent.x;
+				data.mPointer.y = mPointer.mCurrent.y;
+				data.mPointer.touched = mPointer.mCurrent.touched;
+				pEventHandler(data);
+				break;
+			}
+		}
+	}
+	return false;
 }
 
 void PlatformInterface::InitialiseDisplay()
@@ -3681,12 +3713,12 @@ void PlatformInterface::InitialiseDisplay()
   	timespec SleepTime = {0,1000000};
 	while( !mWindowReady )
 	{
-		ProcessX11Events(nullptr);
+		ProcessEvents(nullptr);
 		nanosleep(&SleepTime,NULL);
 	}
 }
 
-bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEventHandler)
+bool PlatformInterface::ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler)
 {
 	// The message pump had to be moved to the same thread as the rendering because otherwise it would fail after a little bit of time.
 	// This is dispite what the documentation stated.
