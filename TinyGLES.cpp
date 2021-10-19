@@ -3329,16 +3329,21 @@ int PlatformInterface::FindMouseDevice()
 		int device = open(devName.c_str(),O_RDONLY|O_NONBLOCK);
 		if( device >  0 )
 		{
+			VERBOSE_MESSAGE("Opened input device: " + devName);
+
 			// Get it's version.
 			int version = 0;
 			if( ioctl(device, EVIOCGVERSION, &version) > 0 )
 			{	// That worked, keep going. Get it's ID
+				VERBOSE_MESSAGE("Input driver version is " << (version >> 16) << "." << ((version >> 8)&0xff) << "." << (version&0xff) );
 				struct input_id id;
 				if( ioctl(device, EVIOCGID, &id) > 0 )
 				{// Get the name
+					VERBOSE_MESSAGE("Input device ID: bus 0x" << std::hex << id.bustype << " vendor 0x" << id.vendor << " product 0x" << id.product << " version 0x" << id.version);
 					char name[256] = "Unknown";
 					if( ioctl(device, EVIOCGNAME(sizeof(name)), name) > 0 )
 					{// Get control bits.
+						VERBOSE_MESSAGE("Input device name: " << name);
 						auto test_bit = [](uint32_t bits[],uint32_t bit)
 						{
 							return (bits[bit/32] & (1UL<<(bit%32)));
@@ -3357,9 +3362,6 @@ int PlatformInterface::FindMouseDevice()
 									test_bit(EV_ABSbits,ABS_X) &&
 									test_bit(EV_ABSbits,ABS_X) )
 								{
-									VERBOSE_MESSAGE("Input driver version is " << (version >> 16) << "." << ((version >> 8)&0xff) << "." << (version&0xff) );
-									VERBOSE_MESSAGE("Input device ID: bus 0x" << std::hex << id.bustype << " vendor 0x" << id.vendor << " product 0x" << id.product << " version 0x" << id.version);
-									VERBOSE_MESSAGE("Input device name: " << name);
 									// We'll have this one please
 									return device;
 								}
@@ -3370,10 +3372,7 @@ int PlatformInterface::FindMouseDevice()
 			}
 			// Get here, no luck, close device check next one.
 			close(device);
-		}
-		else
-		{
-			VERBOSE_MESSAGE("Failed to open input device: " + devName);
+			VERBOSE_MESSAGE("Input device is not the one we want");
 		}
 	}
 
