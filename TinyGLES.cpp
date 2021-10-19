@@ -740,6 +740,13 @@ struct PlatformInterface
 	int GetHeight()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->vdisplay;}return 0;}
 
 	/**
+	 * @brief Looks for a mouse device we can used for touch screen input.
+	 * 
+	 * @return int 
+	 */
+	int FindMouseDevice();
+
+	/**
 	 * @brief Processes the X11 events then exits when all are done. Returns true if the app is asked to quit.
 	 */
 	bool ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler);
@@ -3212,24 +3219,7 @@ void FreeTypeFont::BuildTexture(
 #ifdef PLATFORM_DRM_EGL
 PlatformInterface::PlatformInterface()
 {
-//	const char* MouseDeviceName = "/dev/input/event2";
-	const char* MouseDeviceName = "/dev/input/mouse0";
-	mPointer.mDevice = open(MouseDeviceName,O_RDONLY|O_NONBLOCK); // May fail, this is ok. They may not have one.
-#ifdef VERBOSE_BUILD
-	if(  mPointer.mDevice >  0 )
-	{
-		VERBOSE_MESSAGE("Opened mouse device " << MouseDeviceName);
-		char name[256] = "Unknown";
-		if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
-		{
-			VERBOSE_MESSAGE("Reading mouse from: handle = " << mPointer.mDevice << " name = " << name);
-		}
-	}
-	else
-	{// Not an error, may not have one connected. Depends on the usecase.
-		VERBOSE_MESSAGE("Failed to open mouse device " << MouseDeviceName);
-	}
-#endif
+	mPointer.mDevice = FindMouseDevice();
 
 	if( drmAvailable() == 0 )
 	{
@@ -3328,6 +3318,62 @@ PlatformInterface::~PlatformInterface()
 	drmModeFreeConnector(mConnector);
 	close(mDRMFile);
 	close(mPointer.mDevice);
+}
+
+int PlatformInterface::FindMouseDevice()
+{
+	for( int n = 0 ; n < 16 ; n++ )
+	{
+		const std::string devName = "/dev/input/event" + std::to_string(n);
+
+		int device = open(devName.c_str(),O_RDONLY|O_NONBLOCK);
+		if( device >  0 )
+		{
+			// Get it's version.
+			int version = 0;
+			if( ioctl(device, EVIOCGVERSION, &version) == 0 )
+			{	// That worked, keep going. Get it's ID
+				struct input_id id;
+				if( ioctl(device, EVIOCGID, &id) == 0 )
+				{// Get the name
+					char name[256] = "Unknown";
+					if( ioctl(device, EVIOCGNAME(sizeof(name)), name) > 0 )
+					{// Get control bits.
+						auto test_bit = [](uint32_t bits[],uint32_t bit)
+						{
+							return (bits[bit/32] & (1UL<<(bit%32)));
+						};
+
+						uint32_t EV_KEYbits[(KEY_MAX/32) + 1];
+						uint32_t EV_ABSbits[(KEY_MAX/32) + 1];
+						memset(EV_KEYbits, 0, sizeof(EV_KEYbits));
+						memset(EV_ABSbits, 0, sizeof(EV_ABSbits));
+						if( ioctl(device, EVIOCGBIT(EV_KEY, EV_MAX), EV_KEYbits) > 0 )
+						{
+							if( ioctl(device, EVIOCGBIT(EV_ABS, EV_MAX), EV_ABSbits) > 0 )
+							{
+								// See if it has the control bits we want.
+								if( test_bit(EV_KEYbits,BTN_TOUCH) &&
+									test_bit(EV_ABSbits,ABS_X) &&
+									test_bit(EV_ABSbits,ABS_X) )
+								{
+									VERBOSE_MESSAGE("Input driver version is " << (version >> 16) << "." << ((version >> 8)&0xff) << "." << (version&0xff) );
+									VERBOSE_MESSAGE("Input device ID: bus 0x" << std::hex << id.bustype << " vendor 0x" << id.vendor << " product 0x" << id.product << " version 0x" << id.version);
+									VERBOSE_MESSAGE("Input device name: " << name);
+									// We'll have this one please
+									return device;
+								}
+							}
+						}
+					}
+				}
+			}
+			// Get here, no luck, close device check next one.
+			close(device);
+		}
+	}
+
+	return 0;
 }
 
 bool PlatformInterface::ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler)
