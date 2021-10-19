@@ -3371,6 +3371,10 @@ int PlatformInterface::FindMouseDevice()
 			// Get here, no luck, close device check next one.
 			close(device);
 		}
+		else
+		{
+			VERBOSE_MESSAGE("Failed to open input device: " + devName);
+		}
 	}
 
 	return 0;
