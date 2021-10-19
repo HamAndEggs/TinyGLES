@@ -3333,11 +3333,11 @@ int PlatformInterface::FindMouseDevice()
 
 			// Get it's version.
 			int version = 0;
-			if( ioctl(device, EVIOCGVERSION, &version) > 0 )
+			if( ioctl(device, EVIOCGVERSION, &version) == 0 )
 			{	// That worked, keep going. Get it's ID
 				VERBOSE_MESSAGE("Input driver version is " << (version >> 16) << "." << ((version >> 8)&0xff) << "." << (version&0xff) );
 				struct input_id id;
-				if( ioctl(device, EVIOCGID, &id) > 0 )
+				if( ioctl(device, EVIOCGID, &id) == 0 )
 				{// Get the name
 					VERBOSE_MESSAGE("Input device ID: bus 0x" << std::hex << id.bustype << " vendor 0x" << id.vendor << " product 0x" << id.product << " version 0x" << id.version);
 					char name[256] = "Unknown";
@@ -3353,9 +3353,9 @@ int PlatformInterface::FindMouseDevice()
 						uint32_t EV_ABSbits[(KEY_MAX/32) + 1];
 						memset(EV_KEYbits, 0, sizeof(EV_KEYbits));
 						memset(EV_ABSbits, 0, sizeof(EV_ABSbits));
-						if( ioctl(device, EVIOCGBIT(EV_KEY, EV_MAX), EV_KEYbits) > 0 )
+						if( ioctl(device, EVIOCGBIT(EV_KEY, KEY_MAX), EV_KEYbits) > 0 )
 						{
-							if( ioctl(device, EVIOCGBIT(EV_ABS, EV_MAX), EV_ABSbits) > 0 )
+							if( ioctl(device, EVIOCGBIT(EV_ABS, KEY_MAX), EV_ABSbits) > 0 )
 							{
 								// See if it has the control bits we want.
 								if( test_bit(EV_KEYbits,BTN_TOUCH) &&
@@ -3366,6 +3366,14 @@ int PlatformInterface::FindMouseDevice()
 									return device;
 								}
 							}
+							else
+							{
+								VERBOSE_MESSAGE("Failed to read EVIOCGBIT EV_ABS");
+							}
+						}
+						else
+						{
+							VERBOSE_MESSAGE("Failed to read EVIOCGBIT EV_KEY");
 						}
 					}
 				}
