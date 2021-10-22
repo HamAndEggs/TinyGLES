@@ -132,10 +132,37 @@ int main(int argc, char *argv[])
     myButtons.push_back( std::make_unique<Button>(100,100,220,80,33,150,243,"Log out") );
     myButtons.push_back( std::make_unique<Button>(350,100,220,80,33,150,243,"Invite") );
 
-    GL.SetSystemEventHandler([&myButtons](const tinygles::SystemEventData& pEvent)
+    int CX = 0,CY = 0;
+    bool touched = false;
+
+    tinygles::VerticesShortXY history;
+    // Add one point to make logic in adding code easier.
+    // As we know always will have at least one point.
+    history.emplace_back((short)CX,(short)CY);
+
+    GL.SetSystemEventHandler([&myButtons,&CX,&CY,&touched,&history](const tinygles::SystemEventData& pEvent)
     {
         if( pEvent.mType == tinygles::SystemEventType::POINTER_UPDATED )
         {
+            CX = pEvent.mPointer.x;
+            CY = pEvent.mPointer.y;
+
+            // Only add if moved enough to be intresting.
+            const int dx = (CX - history.end()->x);
+            const int dy = (CY - history.end()->y);
+
+            if( ( (dx*dx) + (dy*dy) ) > 40 )
+            {
+                history.emplace_back((short)CX,(short)CY);
+            }
+
+            // If too big, remove first point.
+            if( history.size() > 100 )
+            {
+                history.erase(history.begin());
+            }
+
+            touched = pEvent.mPointer.touched;
             for( auto& b : myButtons )
             {
                 if( b->ContainsPoint(pEvent.mPointer.x,pEvent.mPointer.y) )
@@ -158,6 +185,14 @@ int main(int argc, char *argv[])
         for( auto& b : myButtons )
         {
             b->Draw();
+        }
+
+        GL.FillCircle(CX,CY,touched?50:30,0,0,0,100);
+
+        // Only draw when we have some intresting points.
+        if( history.size() > 3 )
+        {
+            GL.DrawLineList(history,5,50,200,50);
         }
 
         GL.EndFrame();
