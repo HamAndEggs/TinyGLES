@@ -177,6 +177,7 @@ int main(int argc, char *argv[])
         }
     });
 
+    GL.FontSetColour(0,0,0);
     while( GL.BeginFrame() )
     {
         GL.Clear(255,255,255);
