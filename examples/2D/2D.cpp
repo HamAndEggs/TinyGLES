@@ -33,9 +33,8 @@ int main(int argc, char *argv[])
     std::cout << "Debug build #define DEBUG_BUILD \n";
 #endif
 
-    tinygles::GLES GL;
+    tinygles::GLES GL(tinygles::ROTATE_FRAME_LANDSCAPE);
 
-    std::cout << "Main loop\b";
     int anim = 0;
    	float rot = 0.0f;
     while( GL.BeginFrame() )
@@ -187,7 +186,6 @@ int main(int argc, char *argv[])
 		}
 
         GL.EndFrame();
-
     }
 
 // And quit

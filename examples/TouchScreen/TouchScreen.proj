@@ -1,0 +1,98 @@
+{
+    "source_files": [
+        "TouchScreen.cpp",
+        "../SupportCode/TinyPNG.cpp",
+        "../../TinyGLES.cpp"
+    ],
+   "configurations":
+    {
+        "debug":
+        {
+            "default": true,
+            "include":
+            [
+                "../..",
+                "/usr/include/freetype2",
+                "/usr/include/libdrm"
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "freetype",
+                "GLESv2",
+                "EGL",
+                "gbm",
+                "drm",
+                "z"
+            ],
+            "define":
+            [
+                "DEBUG_BUILD",
+                "PLATFORM_DRM_EGL",
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD",
+                "USE_FREETYPEFONTS"
+            ]
+        },
+        "release":
+        {
+            "default": false,
+            "include":
+            [
+                "../..",
+                "/usr/include/freetype2",
+                "/usr/include/libdrm"
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "freetype",
+                "GLESv2",
+                "EGL",
+                "gbm",
+                "drm",
+                "z"
+            ],
+            "define":
+            [
+                "RELEASE_BUILD",
+                "PLATFORM_DRM_EGL",
+                "USE_FREETYPEFONTS"
+            ]
+        },
+        "x11":
+        {
+            "default": false,
+            "enable_all_warnings": true,
+            "optimisation": "0",
+            "debug_level": "2",
+            "include":
+            [
+                "../..",
+                "/usr/include/freetype2"
+            ],
+            "libs":
+            [
+                "stdc++",
+                "pthread",
+                "m",
+                "freetype",
+                "GL",
+                "X11",
+                "z"
+            ],
+            "define":
+            [
+                "DEBUG_BUILD",
+                "PLATFORM_X11_GL",
+                "VERBOSE_BUILD",
+                "VERBOSE_SHADER_BUILD",
+                "USE_FREETYPEFONTS"
+            ]
+        }
+    }
+}

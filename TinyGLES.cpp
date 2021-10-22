@@ -486,6 +486,7 @@ struct FreeTypeFont
 	FT_Face mFace;								//<! The font we are rending from.
 	uint32_t mTexture;							//<! This is the texture that the glyphs are in so we can render using GL and quads. It's crud but works. ;)
 	std::array<FreeTypeFont::Glyph,96>mGlyphs;	//<! Meta data needed to render the characters.
+	int mBaselineHeight;						//<! This is the number of pixels above baseline the higest character is. Used for centering a font in the y.
 
 	struct
 	{
@@ -714,11 +715,41 @@ struct PlatformInterface
 
 	struct gbm_surface *mNativeWindow = nullptr;
 
+	/**
+	 * @brief Information about the mouse driver
+	 */
+	struct
+	{
+		int mDevice = 0; //!< File handle to /dev/input/mice
+
+		/**
+		 * @brief Maintains the current known values. Because we get many messages.
+		 */
+		struct
+		{
+			bool touched = false;
+			int x = 0;
+			int y = 0;
+		}mCurrent;
+	}mPointer;
+
 	PlatformInterface();
 	~PlatformInterface();
 
 	int GetWidth()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->hdisplay;}return 0;}
 	int GetHeight()const{assert(mModeInfo);if(mModeInfo){return mModeInfo->vdisplay;}return 0;}
+
+	/**
+	 * @brief Looks for a mouse device we can used for touch screen input.
+	 * 
+	 * @return int 
+	 */
+	int FindMouseDevice();
+
+	/**
+	 * @brief Processes the X11 events then exits when all are done. Returns true if the app is asked to quit.
+	 */
+	bool ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler);
 
 
 	void InitialiseDisplay();
@@ -762,7 +793,7 @@ struct PlatformInterface
 	/**
 	 * @brief Processes the X11 events then exits when all are done. Returns true if the app is asked to quit.
 	 */
-	bool ProcessX11Events(tinygles::GLES::SystemEventHandler pEventHandler);
+	bool ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler);
 
 	/**
 	 * @brief Draws the frame buffer to the X11 window.
@@ -785,24 +816,6 @@ GLES::GLES(uint32_t pFlags) :
 {
 	// Lets hook ctrl + c.
 	mUsersSignalAction = signal(SIGINT,CtrlHandler);
-
-	const char* MouseDeviceName = "/dev/input/event0";
-	mPointer.mDevice = open(MouseDeviceName,O_RDONLY|O_NONBLOCK); // May fail, this is ok. They may not have one.
-#ifdef VERBOSE_BUILD
-	if(  mPointer.mDevice >  0 )
-	{
-		VERBOSE_MESSAGE("Opened mouse device " << MouseDeviceName);
-		char name[256] = "Unknown";
-		if( ioctl(mPointer.mDevice, EVIOCGNAME(sizeof(name)), name) == 0 )
-		{
-			VERBOSE_MESSAGE("Reading mouse from: handle = " << mPointer.mDevice << " name = " << name);
-		}
-	}
-	else
-	{// Not an error, may not have one connected. Depends on the usecase.
-		VERBOSE_MESSAGE("Failed to open mouse device " << MouseDeviceName);
-	}
-#endif
 
 	mPhysical.Width = mPlatform->GetWidth();
 	mPhysical.Height = mPlatform->GetHeight();
@@ -2192,62 +2205,23 @@ int GLES::FontGetPrintfWidth(uint32_t pFont,const char* pFmt,...)
 	return FontGetPrintWidth(pFont,buf);	
 }
 
+int GLES::FontGetHeight(uint32_t pFont)const
+{
+	auto& font = mFreeTypeFonts.at(pFont);
+	return font->mBaselineHeight;
+}
+
 #endif
 // End of free type font.
 //*******************************************
 
 void GLES::ProcessSystemEvents()
 {
-#ifdef PLATFORM_X11_GL
-	mCTRL_C_Pressed = mPlatform->ProcessX11Events(mSystemEventHandler);
-#endif
-
-	// We don't bother to read the mouse if no pEventHandler has been registered. Would be a waste of time.
-	if( mPointer.mDevice > 0 && mSystemEventHandler )
-	{
-		struct input_event ev;
-		// Grab all messages and process befor going to next frame.
-		while( read(mPointer.mDevice,&ev,sizeof(ev)) > 0 )
-		{
-			// EV_SYN is a seperator of events.
-#ifdef VERBOSE_BUILD
-			if( ev.type != EV_ABS && ev.type != EV_KEY && ev.type != EV_SYN )
-			{// Anything I missed? 
-				std::cout << std::hex << ev.type << " " << ev.code << " " << ev.value << "\n";
-			}
-#endif
-			switch( ev.type )
-			{
-			case EV_KEY:
-				switch (ev.code)
-				{
-				case BTN_TOUCH:
-					SystemEventData data((ev.value != 0) ? SystemEventType::POINTER_DOWN : SystemEventType::POINTER_UP);
-					data.mPointer.X = mPointer.mCurrent.x;
-					data.mPointer.Y = mPointer.mCurrent.y;
-					mSystemEventHandler(data);
-					break;
-				}
-				break;
-
-			case EV_ABS:
-				switch (ev.code)
-				{
-				case ABS_X:
-					mPointer.mCurrent.x = ev.value;
-					break;
-
-				case ABS_Y:
-					mPointer.mCurrent.y = ev.value;
-					break;
-				}
-				SystemEventData data(SystemEventType::POINTER_MOVE);
-				data.mPointer.X = mPointer.mCurrent.x;
-				data.mPointer.Y = mPointer.mCurrent.y;
-				mSystemEventHandler(data);
-				break;
-			}
-		}
+	if( mPlatform->ProcessEvents(mSystemEventHandler) )
+	{// A system event asked to quit. Like window close button.
+	 // Only set to true based on return of ProcessEvents, if we wrote to it run the risk of missing the ctrl+c message
+	 // from the interrupt call back as it would be overwritten with a false.
+		mCTRL_C_Pressed = true;	
 	}
 
 	// Finnally, did they ctrl + c ?
@@ -2687,7 +2661,7 @@ bool GLES::mCTRL_C_Pressed = false;
 void GLES::CtrlHandler(int SigNum)
 {
 	static int numTimesAskedToExit = 0;
-	// Propergate to someone elses handler, if they felt they wanted to add one too.
+	// Propergate to someone else's handler, if they felt they wanted to add one too.
 	if( mUsersSignalAction != NULL )
 	{
 		mUsersSignalAction(SigNum);
@@ -3079,6 +3053,7 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 	//  any glyph in the face, starting from the glyph baseline.
 	// Code changed, was casing it to render in the Y center of the font not on the base line. Will add it as an option in the future. Richard.
 	int bbox_ymax = 0;//mFace->bbox.yMax / 64;
+	mBaselineHeight = std::max(mBaselineHeight,(int)mFace->bbox.yMax / 64);
 
 	// glyph_width is the pixel width of this specific glyph
 	int glyph_width = mFace->glyph->metrics.width / 64;
@@ -3151,6 +3126,7 @@ void FreeTypeFont::BuildTexture(
 {
 
 	int maxX = 0,maxY = 0;
+	mBaselineHeight = 0;
 
 	std::array<std::vector<uint8_t>,96>glyphsPixels;
 	for( int c = 0 ; c < 96 ; c++ )// Cheap and quick font ASCII renderer. I'm not geeting into unicode. It's a nightmare to make fast in GL on a resource constrained system!
@@ -3170,7 +3146,7 @@ void FreeTypeFont::BuildTexture(
 			}
 		}
 	}
-	VERBOSE_MESSAGE("Font max glyph size requirement for cache is " << maxX << " " << maxY);
+	VERBOSE_MESSAGE("Font max glyph size requirement for cache is " << maxX << " " << maxY << " mBaselineHeight = " << mBaselineHeight);
 	if( maxX > pMaximumAllowedGlyph || maxY > pMaximumAllowedGlyph )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Font: " + mFontName + " requires a very large texture as it's maximun size glyph is very big, maxX == " + std::to_string(maxX) + " maxY == " + std::to_string(maxY) + ". This creation has been halted. Please reduce size of font!");
@@ -3243,6 +3219,8 @@ void FreeTypeFont::BuildTexture(
 #ifdef PLATFORM_DRM_EGL
 PlatformInterface::PlatformInterface()
 {
+	mPointer.mDevice = FindMouseDevice();
+
 	if( drmAvailable() == 0 )
 	{
 		THROW_MEANINGFUL_EXCEPTION("Kernel DRM driver not loaded");
@@ -3339,6 +3317,129 @@ PlatformInterface::~PlatformInterface()
 	drmModeFreeEncoder(mModeEncoder);
 	drmModeFreeConnector(mConnector);
 	close(mDRMFile);
+	close(mPointer.mDevice);
+}
+
+int PlatformInterface::FindMouseDevice()
+{
+	for( int n = 0 ; n < 16 ; n++ )
+	{
+		const std::string devName = "/dev/input/event" + std::to_string(n);
+
+		int device = open(devName.c_str(),O_RDONLY|O_NONBLOCK);
+		if( device >  0 )
+		{
+			VERBOSE_MESSAGE("Opened input device: " + devName);
+
+			// Get it's version.
+			int version = 0;
+			if( ioctl(device, EVIOCGVERSION, &version) == 0 )
+			{	// That worked, keep going. Get it's ID
+				VERBOSE_MESSAGE("Input driver version is " << (version >> 16) << "." << ((version >> 8)&0xff) << "." << (version&0xff) );
+				struct input_id id;
+				if( ioctl(device, EVIOCGID, &id) == 0 )
+				{// Get the name
+					VERBOSE_MESSAGE("Input device ID: bus 0x" << std::hex << id.bustype << " vendor 0x" << id.vendor << " product 0x" << id.product << " version 0x" << id.version);
+					char name[256] = "Unknown";
+					if( ioctl(device, EVIOCGNAME(sizeof(name)), name) > 0 )
+					{// Get control bits.
+						VERBOSE_MESSAGE("Input device name: " << name);
+						auto test_bit = [](uint32_t bits[],uint32_t bit)
+						{
+							return (bits[bit/32] & (1UL<<(bit%32)));
+						};
+
+						uint32_t EV_KEYbits[(KEY_MAX/32) + 1];
+						uint32_t EV_ABSbits[(KEY_MAX/32) + 1];
+						memset(EV_KEYbits, 0, sizeof(EV_KEYbits));
+						memset(EV_ABSbits, 0, sizeof(EV_ABSbits));
+						if( ioctl(device, EVIOCGBIT(EV_KEY, KEY_MAX), EV_KEYbits) > 0 )
+						{
+							if( ioctl(device, EVIOCGBIT(EV_ABS, KEY_MAX), EV_ABSbits) > 0 )
+							{
+								// See if it has the control bits we want.
+								if( test_bit(EV_KEYbits,BTN_TOUCH) &&
+									test_bit(EV_ABSbits,ABS_X) &&
+									test_bit(EV_ABSbits,ABS_X) )
+								{
+									// We'll have this one please
+									return device;
+								}
+							}
+							else
+							{
+								VERBOSE_MESSAGE("Failed to read EVIOCGBIT EV_ABS");
+							}
+						}
+						else
+						{
+							VERBOSE_MESSAGE("Failed to read EVIOCGBIT EV_KEY");
+						}
+					}
+				}
+			}
+			// Get here, no luck, close device check next one.
+			close(device);
+			VERBOSE_MESSAGE("Input device is not the one we want");
+		}
+	}
+
+	return 0;
+}
+
+bool PlatformInterface::ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler)
+{
+	// We don't bother to read the mouse if no pEventHandler has been registered. Would be a waste of time.
+	if( mPointer.mDevice > 0 && pEventHandler )
+	{
+		struct input_event ev;
+		// Grab all messages and process befor going to next frame.
+		while( read(mPointer.mDevice,&ev,sizeof(ev)) > 0 )
+		{
+			// EV_SYN is a seperator of events.
+#ifdef VERBOSE_BUILD
+			if( ev.type != EV_ABS && ev.type != EV_KEY && ev.type != EV_SYN )
+			{// Anything I missed? 
+				std::cout << std::hex << ev.type << " " << ev.code << " " << ev.value << "\n";
+			}
+#endif
+			switch( ev.type )
+			{
+			case EV_KEY:
+				switch (ev.code)
+				{
+				case BTN_TOUCH:
+					mPointer.mCurrent.touched = (ev.value != 0);
+					SystemEventData data(SystemEventType::POINTER_UPDATED);
+					data.mPointer.x = mPointer.mCurrent.x;
+					data.mPointer.y = mPointer.mCurrent.y;
+					data.mPointer.touched = mPointer.mCurrent.touched;
+					pEventHandler(data);
+					break;
+				}
+				break;
+
+			case EV_ABS:
+				switch (ev.code)
+				{
+				case ABS_X:
+					mPointer.mCurrent.x = ev.value;
+					break;
+
+				case ABS_Y:
+					mPointer.mCurrent.y = ev.value;
+					break;
+				}
+				SystemEventData data(SystemEventType::POINTER_UPDATED);
+				data.mPointer.x = mPointer.mCurrent.x;
+				data.mPointer.y = mPointer.mCurrent.y;
+				data.mPointer.touched = mPointer.mCurrent.touched;
+				pEventHandler(data);
+				break;
+			}
+		}
+	}
+	return false;
 }
 
 void PlatformInterface::InitialiseDisplay()
@@ -3535,10 +3636,12 @@ void PlatformInterface::SwapBuffers()
 		FD_SET(0, &fds);
 		FD_SET(mDRMFile, &fds);
 
+		// For some reason this fails when we do ctrl + c dispite hooking into the interrupt.
 		ret = select(mDRMFile + 1, &fds, NULL, NULL, NULL);
-		if (ret < 0)
+		if( ret < 0 )
 		{
-			THROW_MEANINGFUL_EXCEPTION("PlatformInterface::SwapBuffer select on DRM file failed to queue page flip " + std::string(strerror(errno)));
+			// I wanted this to be an exception but could not, see comment on the select. So just cout::error for now...	
+			std::cerr << "PlatformInterface::SwapBuffer select on DRM file failed to queue page flip " << std::string(strerror(errno)) << "\n";
 		}
 
 		drmHandleEvent(mDRMFile, &evctx);
@@ -3667,12 +3770,12 @@ void PlatformInterface::InitialiseDisplay()
   	timespec SleepTime = {0,1000000};
 	while( !mWindowReady )
 	{
-		ProcessX11Events(nullptr);
+		ProcessEvents(nullptr);
 		nanosleep(&SleepTime,NULL);
 	}
 }
 
-bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEventHandler)
+bool PlatformInterface::ProcessEvents(tinygles::GLES::SystemEventHandler pEventHandler)
 {
 	// The message pump had to be moved to the same thread as the rendering because otherwise it would fail after a little bit of time.
 	// This is dispite what the documentation stated.
@@ -3681,6 +3784,7 @@ bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEve
 		THROW_MEANINGFUL_EXCEPTION("The X11 display object is NULL!");
 	}
 
+	static bool touched = false;
 	while( XPending(mXDisplay) )
 	{
 		XEvent e;
@@ -3718,9 +3822,10 @@ bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEve
 		case MotionNotify:// Mouse movement
 			if( pEventHandler )
 			{
-				SystemEventData data(SystemEventType::POINTER_MOVE);
-				data.mPointer.X = e.xmotion.x;
-				data.mPointer.Y = e.xmotion.y;
+				SystemEventData data(SystemEventType::POINTER_UPDATED);
+				data.mPointer.x = e.xmotion.x;
+				data.mPointer.y = e.xmotion.y;
+				data.mPointer.touched = touched;
 				pEventHandler(data);
 			}
 			break;
@@ -3728,9 +3833,12 @@ bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEve
 		case ButtonPress:
 			if( pEventHandler )
 			{
-				SystemEventData data(SystemEventType::POINTER_DOWN);
-				data.mPointer.X = e.xbutton.x;
-				data.mPointer.Y = e.xbutton.y;
+				touched = true;
+
+				SystemEventData data(SystemEventType::POINTER_UPDATED);
+				data.mPointer.x = e.xbutton.x;
+				data.mPointer.y = e.xbutton.y;
+				data.mPointer.touched = touched;
 				pEventHandler(data);
 			}
 			break;
@@ -3738,9 +3846,12 @@ bool PlatformInterface::ProcessX11Events(tinygles::GLES::SystemEventHandler pEve
 		case ButtonRelease:
 			if( pEventHandler )
 			{
-				SystemEventData data(SystemEventType::POINTER_UP);
-				data.mPointer.X = e.xbutton.x;
-				data.mPointer.Y = e.xbutton.y;
+				touched = false;
+
+				SystemEventData data(SystemEventType::POINTER_UPDATED);
+				data.mPointer.x = e.xbutton.x;
+				data.mPointer.y = e.xbutton.y;
+				data.mPointer.touched = touched;
 				pEventHandler(data);
 			}
 			break;

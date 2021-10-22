@@ -16,7 +16,7 @@ int main(int argc, char *argv[])
 
     tinygles::GLES GL(tinygles::ROTATE_FRAME_LANDSCAPE);
 
-    const std::string faceName("./Blenda Script.otf");
+    const std::string faceName("../data/Blenda Script.otf");
     const uint32_t aFont = GL.FontLoad(faceName,40);
 
     int anim = 0;

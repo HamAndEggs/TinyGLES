@@ -137,9 +137,7 @@ enum struct SystemEventType
 	EXIT_REQUEST,	//!< User closed the window or pressed ctrl + c
 
 	// Generic display mouse or touch events.
-	POINTER_MOVE,
-	POINTER_DOWN,
-	POINTER_UP
+	POINTER_UPDATED		//!< Something about the pointer / touch screen changed.
 };
 
 /**
@@ -168,8 +166,9 @@ struct SystemEventData
 
 	struct
 	{
-		int X = 0;
-		int Y = 0;
+		int x = 0;
+		int y = 0;
+		bool touched = false;
 	}mPointer;
 
 	SystemEventData(SystemEventType pType) : mType(pType){}
@@ -601,11 +600,20 @@ public:
 	uint32_t FontLoad(const std::string& pFontName,int pPixelHeight = 40);
 	void FontDelete(uint32_t pFont);
 
+	/**
+	 * @brief renders the font at x and y, y is where the baseline is rendered.
+	 */
 	void FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText);
 	void FontPrintf(uint32_t pFont,int pX,int pY,const char* pFmt,...);
 
 	int FontGetPrintWidth(uint32_t pFont,const std::string_view& pText);
 	int FontGetPrintfWidth(uint32_t pFont,const char* pFmt,...);
+
+	/**
+	 * @brief Returns the number of pixels for the higest character above the baseline.
+	 * Handy for font centering in a rectangle.
+	 */
+	int FontGetHeight(uint32_t pFont)const;
 
 	void FontSetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
 	void FontSetMaximumAllowedGlyph(int pMaxSize){mMaximumAllowedGlyph = pMaxSize;} // The default size is 128 per character. Any bigger will throw an exception, this allows you to go bigger, but kiss good by to vram. Really should do something else instead!
@@ -698,23 +706,6 @@ private:
 		uint8_t R = 255,G = 255,B = 255,A = 255;
 		int scale = 1;
 	}mPixelFont;
-
-	/**
-	 * @brief Information about the mouse driver
-	 */
-	struct
-	{
-		int mDevice = 0; //!< File handle to /dev/input/mice
-
-		/**
-		 * @brief Maintains the current known values. Because we get many messages.
-		 */
-		struct
-		{
-			int x = 0;
-			int y = 0;
-		}mCurrent;
-	}mPointer;
 
 	struct
 	{
