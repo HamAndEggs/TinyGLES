@@ -2220,9 +2220,12 @@ int GLES::FontGetPrintWidth(uint32_t pFont,const std::string_view& pText)
 
 	// Get where the uvs will be written too.
 	int x = 0;
-	for( auto c : pText )
+	const char* ptr = pText.data();
+
+	FT_UInt glyph = 0;
+	while( (glyph = GetNextGlyph(ptr)) != 0 )
 	{
-		const int index = GetGlyphIndex(c);
+		const int index = GetGlyphIndex(glyph);
 		if( index < 0 )
 		{
 			x += font->mSpaceAdvance;
