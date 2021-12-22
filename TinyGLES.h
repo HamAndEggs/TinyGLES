@@ -615,6 +615,11 @@ public:
 	 */
 	int FontGetHeight(uint32_t pFont)const;
 
+	/**
+	 * @brief Returns the texture being used to render the font.
+	 */
+	uint32_t FontGetTexture(uint32_t pFont)const;
+
 	void FontSetColour(uint32_t pFont,uint8_t pRed,uint8_t pGreen,uint8_t pBlue,uint8_t pAlpha = 255);
 	void FontSetMaximumAllowedGlyph(int pMaxSize){mMaximumAllowedGlyph = pMaxSize;} // The default size is 128 per character. Any bigger will throw an exception, this allows you to go bigger, but kiss good by to vram. Really should do something else instead!
 

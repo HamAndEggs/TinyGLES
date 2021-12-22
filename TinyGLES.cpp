@@ -453,6 +453,9 @@ constexpr GLint TextureFormatToGLFormat(TextureFormat pFormat)
  */
 struct FreeTypeFont
 {
+	/**
+	 * @brief An entry into the glyph cache
+	 */
 	struct Glyph
 	{
 		int width;
@@ -472,7 +475,7 @@ struct FreeTypeFont
 	/**
 	 * @brief Get the Glyph object of an ASCII character. All that is needed to render as well as build the texture.
 	 */
-	bool GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<uint8_t>& rPixels);
+	bool GetGlyph(FT_UInt pChar,FreeTypeFont::Glyph& rGlyph,std::vector<uint8_t>& rPixels);
 
 	/**
 	 * @brief Builds our texture object.
@@ -484,9 +487,10 @@ struct FreeTypeFont
 
 	const std::string mFontName; //<! Helps with debugging.
 	FT_Face mFace;								//<! The font we are rending from.
-	uint32_t mTexture;							//<! This is the texture that the glyphs are in so we can render using GL and quads. It's crud but works. ;)
+	uint32_t mTexture;							//<! This is the texture that the glyphs are in so we can render using GL and quads.
 	std::array<FreeTypeFont::Glyph,96>mGlyphs;	//<! Meta data needed to render the characters.
 	int mBaselineHeight;						//<! This is the number of pixels above baseline the higest character is. Used for centering a font in the y.
+	int mSpaceAdvance;							//<! How much to advance by for a non rerendered character.
 
 	struct
 	{
@@ -497,6 +501,37 @@ struct FreeTypeFont
 	}mColour;	
 
 };
+
+/**
+ * @brief Because this is a very simple font system I have a limited number of characters I can render. This allows me to use the ones I expect to be most useful.
+ */
+static std::array<int,256>GlyphIndex;
+static bool BuildGlyphIndex = true;
+
+inline int GetGlyphIndex(FT_UInt pCharacter)
+{
+	return GlyphIndex[pCharacter];
+}
+
+inline FT_UInt GetNextGlyph(const char *& pText)
+{
+	if( pText == 0 )
+		return 0;
+
+	const FT_UInt c1 = *pText;
+	pText++;
+
+	if( (c1&0x80) == 0 )
+	{
+		return c1;
+	}
+
+	const FT_UInt c2 = *pText;
+	pText++;
+
+	return ((c1&0x3f) << 6) | (c2&0x3f);
+}
+
 #endif // #ifdef USE_FREETYPEFONTS
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1338,7 +1373,7 @@ uint32_t GLES::SpriteCreate(uint32_t pTexture,float pWidth,float pHeight,float p
 
 	if( mSprites.find(newSprite) != mSprites.end() )
 	{
-		THROW_MEANINGFUL_EXCEPTION("Bug found in reindering code, sprite index is an index that we already know about.");
+		THROW_MEANINGFUL_EXCEPTION("Bug found in rendering code, sprite index is an index that we already know about.");
 	}
 
 	mSprites[newSprite] = std::make_unique<Sprite>();
@@ -2123,11 +2158,19 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 	mWorkBuffers->uvShort.Restart();
 
 	// Get where the uvs will be written too.
-	for( auto c : pText )
+	const char* ptr = pText.data();
+
+	FT_UInt glyph = 0;
+	while( (glyph = GetNextGlyph(ptr)) != 0 )
 	{
-		if( c > 31 || c < 127 )
+		const int index = GetGlyphIndex(glyph);
+		if( index < 0 )
 		{
-			auto&g = font->mGlyphs.at(c-32);
+			pX += font->mSpaceAdvance;
+		}
+		else
+		{
+			auto&g = font->mGlyphs.at(index);
 
 			mWorkBuffers->vertices2DShort.BuildQuad(pX + g.x_off,pY + g.y_off,g.width,g.height);
 
@@ -2138,10 +2181,6 @@ void GLES::FontPrint(uint32_t pFont,int pX,int pY,const std::string_view& pText)
 					g.uv[1].y);
 
 			pX += g.advance;
-		}
-		else
-		{
-			pX += font->mGlyphs[0].advance;
 		}
 	}
 
@@ -2183,13 +2222,14 @@ int GLES::FontGetPrintWidth(uint32_t pFont,const std::string_view& pText)
 	int x = 0;
 	for( auto c : pText )
 	{
-		if( c > 31 || c < 127 )
+		const int index = GetGlyphIndex(c);
+		if( index < 0 )
 		{
-			x += font->mGlyphs.at(c-32).advance;
+			x += font->mSpaceAdvance;
 		}
 		else
 		{
-			x += font->mGlyphs[0].advance;
+			x += font->mGlyphs.at(index).advance;
 		}
 	}
 	return x;
@@ -2210,6 +2250,13 @@ int GLES::FontGetHeight(uint32_t pFont)const
 	auto& font = mFreeTypeFonts.at(pFont);
 	return font->mBaselineHeight;
 }
+
+uint32_t GLES::FontGetTexture(uint32_t pFont)const
+{
+	auto& font = mFreeTypeFonts.at(pFont);
+	return font->mTexture;
+}
+
 
 #endif
 // End of free type font.
@@ -2982,6 +3029,44 @@ FreeTypeFont::FreeTypeFont(FT_Face pFontFace,int pPixelHeight) :
 	mFontName(pFontFace->family_name),
 	mFace(pFontFace)
 {
+	if( BuildGlyphIndex )
+	{
+		BuildGlyphIndex = false;
+		// First set all to -1 (not used)
+		for( auto& i : GlyphIndex )
+		{
+			i = -1;
+		}
+
+		// Now set up the indices for the ones we use. has be be 96 characters as that is how many glyphs we have.
+		const char AllowedCharacters[] = "0123456789ABCDEFGHIJKLMNOPQRSTUZWXYZabcdefghijklmnopqrstuvwxyz@!\"#$%&'()*+,-./:;<>=?[]\\^{}|~`¬£";
+
+		size_t n = 0;
+
+		const char* ptr = AllowedCharacters;
+
+		FT_UInt glyph = 0;
+		while( (glyph = GetNextGlyph(ptr)) != 0 )
+		{
+			assert( n < 96 );
+			assert( glyph < GlyphIndex.size() );
+			GlyphIndex[glyph] = n;
+			n++;
+		}
+
+//		std::clog << "sizeof(AllowedCharacters) == " << sizeof(AllowedCharacters) << "\n";
+//		assert( sizeof(AllowedCharacters) == 96 );
+/*		for( size_t n = 0 ; n < sizeof(AllowedCharacters) ; n++ )
+		{
+			const char letter = AllowedCharacters[n];
+			const int index = letter+128;
+			std::clog << letter << " : " << index << " -> " << n << "\n";
+			GlyphIndex[index] = n;
+		}
+		*/
+	}
+
+
 	if( FT_Set_Pixel_Sizes(mFace,0,pPixelHeight) == 0 )
 	{
 		VERBOSE_MESSAGE("Set pixel size " << pPixelHeight << " for true type font " << mFontName);
@@ -2997,7 +3082,7 @@ FreeTypeFont::~FreeTypeFont()
 	FT_Done_Face(mFace);	
 }
 
-bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<uint8_t>& rPixels)
+bool FreeTypeFont::GetGlyph(FT_UInt pChar,FreeTypeFont::Glyph& rGlyph,std::vector<uint8_t>& rPixels)
 {
 	assert(mFace);
 
@@ -3117,7 +3202,7 @@ bool FreeTypeFont::GetGlyph(char pChar,FreeTypeFont::Glyph& rGlyph,std::vector<u
 
 	if( expectedSize != rPixels.size() )
 	{
-		THROW_MEANINGFUL_EXCEPTION("Font: " + mFontName + " Error, we read more pixels for free type font than expected for the glyph " + pChar );
+		THROW_MEANINGFUL_EXCEPTION("Font: " + mFontName + " Error, we read more pixels for free type font than expected for the glyph " + std::to_string(pChar) );
 	}
 
 	return true;
@@ -3132,21 +3217,33 @@ void FreeTypeFont::BuildTexture(
 	int maxX = 0,maxY = 0;
 	mBaselineHeight = 0;
 
+	FreeTypeFont::Glyph spaceGlyph;
+	std::vector<uint8_t> spacePixels;
+	GetGlyph(' ',spaceGlyph,spacePixels);
+	mSpaceAdvance = spaceGlyph.advance;
+
 	std::array<std::vector<uint8_t>,96>glyphsPixels;
-	for( int c = 0 ; c < 96 ; c++ )// Cheap and quick font ASCII renderer. I'm not geeting into unicode. It's a nightmare to make fast in GL on a resource constrained system!
+	for( FT_UInt c = 0 ; c < 256 ; c++ )// Cheap and quick font ASCII renderer. I'm not geeting into unicode. It's a nightmare to make fast in GL on a resource constrained system!
 	{
-		auto& g = mGlyphs.at(c);
-		auto& p = glyphsPixels.at(c);
-		if( GetGlyph((char)(c+32),g,p) )
+		const int index = GetGlyphIndex(c);
+		if( index >= 0 )
 		{
-			if( p.size() > 0 )
+			assert( (size_t)index < mGlyphs.size() );
+			assert( (size_t)index < glyphsPixels.size() );
+
+			auto& g = mGlyphs.at(index);
+			auto& p = glyphsPixels.at(index);
+			if( GetGlyph(c,g,p) )
 			{
-				maxX = std::max(maxX,g.width);
-				maxY = std::max(maxY,g.height);
-			}
-			else
-			{
-				VERBOSE_MESSAGE("Character " << c << " is empty, will just move the cursor " << g.advance << " pixels");
+				if( p.size() > 0 )
+				{
+					maxX = std::max(maxX,g.width);
+					maxY = std::max(maxY,g.height);
+				}
+				else
+				{
+					VERBOSE_MESSAGE("Character " << c << " is empty, will just move the cursor " << g.advance << " pixels");
+				}
 			}
 		}
 	}
@@ -3178,13 +3275,15 @@ void FreeTypeFont::BuildTexture(
 	const int cellWidth = width / 12;
 	const int cellHeight = height / 8;
 	const int maxUV = 32767;
-	int n = 0;
-	for( int y = 0 ; y < 8 ; y++ )
+	int y = 0;
+	int x = 0;
+	for( FT_UInt c = 0 ; c < 256 ; c++ )
 	{
-		for( int x = 0 ; x < 12 ; x++, n++ )
+		const int index = GetGlyphIndex(c);
+		if( index >= 0 )
 		{
-			auto& g = mGlyphs.at(n);
-			auto& p = glyphsPixels.at(n);
+			auto& g = mGlyphs.at(index);
+			auto& p = glyphsPixels.at(index);
 			const int cx = (x * cellWidth) + (cellWidth/2) - (g.width / 2);
 			const int cy = (y * cellHeight) + (cellHeight/2) - (g.height / 2);
 			if( p.size() > 0 )
@@ -3209,6 +3308,14 @@ void FreeTypeFont::BuildTexture(
 				g.uv[0].y = 0;
 				g.uv[1].x = 0;
 				g.uv[1].y = 0;
+			}
+
+			// Advance to the next free cell.
+			x++;
+			if( x == 12 )
+			{
+				x = 0;
+				y++;
 			}
 		}
 	}	
