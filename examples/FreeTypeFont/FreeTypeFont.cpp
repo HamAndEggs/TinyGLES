@@ -16,7 +16,7 @@ int main(int argc, char *argv[])
 
     tinygles::GLES GL(tinygles::ROTATE_FRAME_LANDSCAPE);
 
-    const std::string faceName("../data/Blenda Script.otf");
+    const std::string faceName("../data/LiberationSerif-Bold.ttf");
     const uint32_t aFont = GL.FontLoad(faceName,40);
 
     int anim = 0;
@@ -28,20 +28,22 @@ int main(int argc, char *argv[])
         GL.FillRoundedRectangle(50,50,GL.GetWidth()-50,GL.GetHeight()-50,100,55,20,155);
         GL.DrawRoundedRectangle(50,50,GL.GetWidth()-50,GL.GetHeight()-50,100,255,255,255);
 
-        GL.FontPrint(80,80,"The fixed built in font for comparison");
+        GL.FontPrint(120,60,"The fixed built in font for comparison");
 
         GL.FontSetColour(aFont,255,255,255);
-        GL.FontPrint(aFont,80,150,"The free type font," + faceName + ", for comparison");
+        GL.FontPrint(aFont,80,110,"ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        GL.FontPrint(aFont,80,180,"@!\"#$%&\'()*+,-./:;<>=?[]\\^{}|~£`");
+        GL.FontPrint(aFont,80,240,"0123456789 abcdefghijklmnopqrstuvwxyz");
 
-        GL.FontPrintf(aFont,80,200,"Anim: %d",anim);
+        GL.FontPrintf(aFont,80,280,"Anim:£ %d",anim);
 
-        GL.FillRectangle(90,260,700,340,0,0,0);
+        GL.FillRectangle(90,300,700,380,0,0,0);
         GL.FontSetColour(aFont,255,0,0);
-        GL.FontPrint(aFont,100,300,"RED");
+        GL.FontPrint(aFont,100,340,"RED");
         GL.FontSetColour(aFont,0,255,0);
-        GL.FontPrint(aFont,300,300,"GREEN");
+        GL.FontPrint(aFont,300,340,"GREEN");
         GL.FontSetColour(aFont,0,0,255);
-        GL.FontPrint(aFont,500,300,"BLUE");
+        GL.FontPrint(aFont,500,340,"BLUE");
 
         // Later, I can add FontPrintfJustify and use the GOU to move it once we've built the verts and know the length. Be quicker.
         const int width = GL.FontGetPrintfWidth(aFont,"Numbers to make to change length: %f -> %d",std::sin(anim*0.021f) * 17.0f,anim);
