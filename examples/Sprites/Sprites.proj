@@ -54,6 +54,7 @@
             ],
             "define":
             [
+                "NDEBUG",
                 "RELEASE_BUILD",
                 "PLATFORM_DRM_EGL",
                 "VERBOSE_BUILD",
