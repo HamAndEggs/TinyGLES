@@ -114,9 +114,12 @@ int main(int argc, char *argv[])
     bool usingBatch = true;
     GL.SetSystemEventHandler([&usingBatch](auto pEvent)
     {
-        if( pEvent.mType == tinygles::SystemEventType::POINTER_DOWN )
+        if( pEvent.mType == tinygles::SystemEventType::POINTER_UPDATED )
         {
-            usingBatch = !usingBatch;
+            if( pEvent.mPointer.touched )
+            {
+                usingBatch = !usingBatch;
+            }
         }
     });
 

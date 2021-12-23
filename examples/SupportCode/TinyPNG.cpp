@@ -6,7 +6,7 @@
 #include <assert.h>
 #include <endian.h>
 
-#include <zlib.h> // TODO write my own decompressor. For now use this one.
+#include <zlib.h> // TODO write my own decompressor. For now use this one. sudo apt install zlib1g-dev
 
 #include "TinyPNG.h"
 
