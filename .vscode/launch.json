@@ -22,6 +22,26 @@
                     "ignoreFailures": true
                 }
             ]
+        },
+        {
+            "name": "Sprites",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/examples/Sprites/bin/x11/Sprites",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/examples/Sprites",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
         }
+
     ]
 }

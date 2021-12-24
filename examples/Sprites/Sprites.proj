@@ -2,6 +2,7 @@
     "source_files": [
         "Sprites.cpp",
         "../SupportCode/TinyPNG.cpp",
+        "../SupportCode/TinyTools.cpp",
         "../../TinyGLES.cpp"
     ],
     "configurations":

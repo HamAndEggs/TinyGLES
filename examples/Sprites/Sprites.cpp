@@ -1,5 +1,6 @@
 #include "TinyGLES.h"
 #include "../SupportCode/TinyPNG.h"
+#include "../SupportCode/TinyTools.h"
 
 #include <iostream>
 #include <assert.h>
@@ -137,6 +138,18 @@ int main(int argc, char *argv[])
 
     uint32_t ballBatch = GL.QuadBatchCreate(ball,balls.size());
 
+    std::map<int,tinytools::system::CPULoadTracking> trackingData;
+    float cpuTemperature = 0;
+    int totalSystemLoad = 0;
+    tinytools::threading::SleepableThread statsUpdater;
+    statsUpdater.Tick(1,[&totalSystemLoad,&trackingData,&cpuTemperature]()
+    {
+        std::map<int,int> CPULoads;
+        tinytools::system::GetCPULoad(trackingData,totalSystemLoad,CPULoads);
+        cpuTemperature = tinytools::system::GetCPUTemperature();
+        std::cout << "* ";
+    });
+
     int anim = 0;
     std::cout << "Starting render loop\n";
     while( GL.BeginFrame() )
@@ -169,25 +182,37 @@ int main(int argc, char *argv[])
 
         GL.FillRectangle(0,GL.GetHeight()-400,256,GL.GetHeight(),tree);
 
-        const int DialX = GL.GetWidth()-256;
-        const int DialY = 0;
-        const float a = anim;
-        const float r = tinygles::DegreeToRadian(125.3f * std::sin(a * 0.01f));
-
-        GL.Blit(Dial,DialX,DialY);
-
-        GL.SetTransform2D(DialX+128,DialY+128,r,1.3f);
-        GL.SpriteDraw(NeedleSprite);
-
+        // Draw some info text
+        GL.FillRectangle(0,0,GL.GetWidth(),40,0,0,0,140);
         GL.FontPrint(0,0,"Press here to toggle batch drawing");
         if( usingBatch )
             GL.FontPrint(0,15,"Drawing with a batch");
         else
             GL.FontPrint(0,15,"Drawing one at a time");
 
+        {
+            const int y = GL.GetHeight()-40;
+            GL.FillRectangle(0,y,GL.GetWidth(),GL.GetHeight(),0,0,0,140);
+            GL.FontPrintf(0,y,"CPU TEMP:%3.1fC",cpuTemperature);
+
+            GL.FontPrintf(0,y+20,"CPU LOAD:%d%%",totalSystemLoad);
+        }
+
+        // Draw dial
+        const int DialX = GL.GetWidth()-256;
+        const int DialY = 0;
+        const float a = anim;
+        const float r = tinygles::DegreeToRadian(125.3f * std::sin(a * 0.01f));
+
+        GL.Blit(Dial,DialX,DialY);
+        GL.SetTransform2D(DialX+128,DialY+128,r,1.3f);
+        GL.SpriteDraw(NeedleSprite);
+
         GL.EndFrame();
 
     }
+
+    statsUpdater.TellThreadToExitAndWait();
 
     return EXIT_SUCCESS;
 }
