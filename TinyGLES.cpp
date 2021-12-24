@@ -3453,7 +3453,7 @@ int PlatformInterface::FindMouseDevice()
 				struct input_id id;
 				if( ioctl(device, EVIOCGID, &id) == 0 )
 				{// Get the name
-					VERBOSE_MESSAGE("Input device ID: bus 0x" << std::hex << id.bustype << " vendor 0x" << id.vendor << " product 0x" << id.product << " version 0x" << id.version);
+					VERBOSE_MESSAGE("Input device ID: bus 0x" << std::hex << id.bustype << " vendor 0x" << id.vendor << " product 0x" << id.product << " version 0x" << id.version << std::dec);
 					char name[256] = "Unknown";
 					if( ioctl(device, EVIOCGNAME(sizeof(name)), name) > 0 )
 					{// Get control bits.
@@ -3514,7 +3514,7 @@ bool PlatformInterface::ProcessEvents(tinygles::GLES::SystemEventHandler pEventH
 #ifdef VERBOSE_BUILD
 			if( ev.type != EV_ABS && ev.type != EV_KEY && ev.type != EV_SYN )
 			{// Anything I missed? 
-				std::cout << std::hex << ev.type << " " << ev.code << " " << ev.value << "\n";
+				std::cout << std::hex << ev.type << " " << ev.code << " " << ev.value  << std::dec << "\n";
 			}
 #endif
 			switch( ev.type )
