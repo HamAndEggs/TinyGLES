@@ -147,7 +147,6 @@ int main(int argc, char *argv[])
         std::map<int,int> CPULoads;
         tinytools::system::GetCPULoad(trackingData,totalSystemLoad,CPULoads);
         cpuTemperature = tinytools::system::GetCPUTemperature();
-        std::cout << "* ";
     });
 
     int anim = 0;
